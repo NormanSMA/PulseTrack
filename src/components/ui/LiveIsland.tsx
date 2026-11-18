@@ -17,6 +17,7 @@ interface LiveIslandContextValue {
   setState: (next: LiveIslandState) => void;
   timerSeconds: number;
   resetTimer: (seconds?: number) => void;
+  announcement: string;
 }
 
 const LiveIslandContext = createContext<LiveIslandContextValue | null>(null);
@@ -27,6 +28,7 @@ const STATE_META: Record<
     badge: string;
     title: string;
     detail: string;
+    announcement: string;
     dotClass: string;
     borderClass: string;
     textClass: string;
@@ -36,6 +38,7 @@ const STATE_META: Record<
     badge: "READY",
     title: "PulseTrack 144Hz",
     detail: "Recovery 86%",
+    announcement: "LiveIsland en reposo: Recovery 86 por ciento.",
     dotClass: "bg-accent-recovery",
     borderClass: "border-border-strong",
     textClass: "text-accent-recovery",
@@ -44,24 +47,27 @@ const STATE_META: Record<
     badge: "SYNC",
     title: "Garmin + RENPHO",
     detail: "Cache 15m · idb",
+    announcement: "Sincronización inalámbrica con Garmin y RENPHO iniciada.",
     dotClass: "bg-accent-strain pt-pulse-opacity",
-    borderClass: "border-accent-strain/50",
+    borderClass: "border-accent-strain/70",
     textClass: "text-accent-strain",
   },
   "gym-timer": {
     badge: "REST",
     title: "Descanso activo",
     detail: "Hevy Set #4",
+    announcement: "Temporizador de descanso iniciado.",
     dotClass: "bg-accent-sleep pt-pulse-opacity",
-    borderClass: "border-accent-sleep/50",
+    borderClass: "border-accent-sleep/70",
     textClass: "text-accent-sleep",
   },
   alert: {
     badge: "ALERT",
     title: "ACWR 1.38 elevado",
     detail: "Reducir carga hoy",
+    announcement: "Alerta de carga: ACWR 1.38 elevado.",
     dotClass: "bg-accent-alert pt-pulse-opacity",
-    borderClass: "border-accent-alert/60",
+    borderClass: "border-accent-alert/80",
     textClass: "text-accent-alert",
   },
 };
@@ -74,13 +80,26 @@ function formatClock(totalSeconds: number): string {
 }
 
 export function LiveIslandProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<LiveIslandState>("idle");
+  const [state, setStateRaw] = useState<LiveIslandState>("idle");
   const [timerSeconds, setTimerSeconds] = useState<number>(90);
+  const [announcement, setAnnouncement] = useState<string>(STATE_META.idle.announcement);
+
+  const setState = useCallback((next: LiveIslandState) => {
+    setStateRaw(next);
+    setAnnouncement(STATE_META[next].announcement);
+  }, []);
 
   useEffect(() => {
     if (state !== "gym-timer") return;
     const intervalId = window.setInterval(() => {
-      setTimerSeconds((prev) => (prev > 0 ? prev - 1 : 90));
+      setTimerSeconds((prev) => {
+        if (prev <= 0) return 0;
+        if (prev === 1) {
+          setAnnouncement("Descanso completado.");
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
     return () => window.clearInterval(intervalId);
   }, [state]);
@@ -90,8 +109,8 @@ export function LiveIslandProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<LiveIslandContextValue>(
-    () => ({ state, setState, timerSeconds, resetTimer }),
-    [state, timerSeconds, resetTimer],
+    () => ({ state, setState, timerSeconds, resetTimer, announcement }),
+    [state, setState, timerSeconds, resetTimer, announcement],
   );
 
   return (
@@ -110,18 +129,26 @@ export function useLiveIsland(): LiveIslandContextValue {
 }
 
 export function LiveIsland() {
-  const { state, timerSeconds } = useLiveIsland();
+  const { state, setState, timerSeconds, announcement } = useLiveIsland();
   const [visible, setVisible] = useState<boolean>(true);
   const [displayState, setDisplayState] = useState<LiveIslandState>(state);
+  const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
 
   useEffect(() => {
     if (state === displayState) return;
+    setIsTransitioning(true);
     setVisible(false);
     const frameId = window.requestAnimationFrame(() => {
       setDisplayState(state);
       setVisible(true);
     });
-    return () => window.cancelAnimationFrame(frameId);
+    const endTimer = window.setTimeout(() => {
+      setIsTransitioning(false);
+    }, 200);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(endTimer);
+    };
   }, [state, displayState]);
 
   const meta = STATE_META[displayState];
@@ -129,37 +156,54 @@ export function LiveIsland() {
     displayState === "gym-timer" ? formatClock(timerSeconds) : meta.detail;
 
   return (
-    <div
-      className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center pt-[max(0.75rem,env(safe-area-inset-top))]"
-      role="status"
-      aria-live="polite"
-    >
-      <div
-        className={`pointer-events-auto flex h-11 w-[min(92vw,24rem)] items-center justify-between rounded-full border bg-surface/95 px-4 backdrop-blur-md pt-motion-gpu motion-reduce:transition-none ${meta.borderClass} ${
-          visible
-            ? "translate-y-0 scale-100 opacity-100"
-            : "-translate-y-1 scale-95 opacity-0"
-        }`}
-      >
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span
-            className={`h-2.5 w-2.5 shrink-0 rounded-full pt-motion-gpu ${meta.dotClass}`}
-            aria-hidden="true"
-          />
-          <span
-            className={`text-xs font-semibold tracking-wider tabular-nums ${meta.textClass}`}
-          >
-            {meta.badge}
-          </span>
-          <span className="truncate text-sm font-medium text-ink-primary">
-            {meta.title}
-          </span>
-        </div>
-        <span className="ml-3 shrink-0 font-mono text-xs font-semibold text-ink-secondary tabular-nums">
-          {rightValue}
-        </span>
+    <>
+      <div className="sr-only" role="status" aria-live="polite">
+        {announcement}
       </div>
-    </div>
+
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div
+          className={`pointer-events-auto flex min-h-11 w-[min(92vw,25rem)] items-center justify-between gap-2 rounded-full border bg-surface px-4 pt-motion-gpu motion-reduce:transition-none motion-reduce:transform-none ${
+            isTransitioning ? "will-change-[transform,opacity]" : ""
+          } ${meta.borderClass} ${
+            visible
+              ? "[transform:translate3d(0,0,0)_scale(1)] opacity-100"
+              : "[transform:translate3d(0,-4px,0)_scale(0.96)] opacity-0"
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span
+              className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.dotClass}`}
+              aria-hidden="true"
+            />
+            <span
+              className={`text-xs font-semibold tracking-wider tabular-nums ${meta.textClass}`}
+            >
+              {meta.badge}
+            </span>
+            <span className="truncate text-sm font-medium text-ink-primary tabular-nums">
+              {meta.title}
+            </span>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="font-mono text-xs font-semibold text-ink-secondary tabular-nums">
+              {rightValue}
+            </span>
+            {displayState === "gym-timer" ? (
+              <button
+                type="button"
+                aria-label="Detener temporizador"
+                onClick={() => setState("idle")}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-xs font-semibold text-accent-alert pt-motion-gpu hover:text-ink-primary active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+              >
+                Stop
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -192,10 +236,10 @@ export function LiveIslandControls() {
               }
               setState(item.id);
             }}
-            className={`min-h-11 rounded-full border px-4 text-xs font-semibold uppercase tracking-wider pt-motion-gpu active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`min-h-11 rounded-full border px-4 text-xs font-semibold uppercase tracking-wider pt-motion-gpu active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-40 ${
               active
                 ? "border-ink-primary bg-ink-primary text-void"
-                : "border-border-strong bg-surface text-ink-primary hover:border-ink-primary/60 hover:bg-elevated"
+                : "border-border-strong bg-surface text-ink-primary hover:border-ink-primary hover:bg-elevated"
             }`}
           >
             {item.label}

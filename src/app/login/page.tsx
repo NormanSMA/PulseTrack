@@ -50,7 +50,7 @@ export default function LoginPage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="norman@pulsetrack.local"
-              className="min-h-11 w-full rounded-xl border border-border-strong bg-void px-4 text-sm text-ink-primary placeholder:text-ink-secondary/60 pt-motion-gpu hover:border-ink-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-11 w-full rounded-xl border border-border-strong bg-void px-4 text-sm text-ink-primary placeholder:text-ink-secondary pt-motion-gpu hover:border-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
 
@@ -66,7 +66,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="min-h-11 w-full rounded-full bg-ink-primary px-5 text-xs font-semibold uppercase tracking-wider text-void pt-motion-gpu hover:bg-ink-primary/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-11 w-full rounded-full bg-ink-primary px-5 text-xs font-semibold uppercase tracking-wider text-void pt-motion-gpu hover:bg-ink-primary/90 active:scale-[0.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Verificando..." : "Entrar"}
           </button>

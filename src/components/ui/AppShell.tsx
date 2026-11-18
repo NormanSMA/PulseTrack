@@ -46,21 +46,25 @@ export function AppShell({ children }: { children: ReactNode }) {
             }`}
           >
             <div className="p-4 pt-6">
-              <div className="flex items-center justify-between gap-2">
+              <div
+                className={`flex gap-2 ${
+                  collapsed
+                    ? "flex-col items-center"
+                    : "flex-row items-center justify-between"
+                }`}
+              >
                 <Link
                   href="/"
-                  className="flex min-h-11 items-center gap-2.5 rounded-xl px-2 font-semibold tracking-tight text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+                  className="flex min-h-11 min-w-11 items-center justify-center gap-2.5 rounded-xl px-2 font-semibold tracking-tight text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
                 >
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border-strong bg-void text-xs font-bold tabular-nums">
                     PT
                   </span>
-                  <span
-                    className={`text-sm pt-motion-gpu ${
-                      collapsed ? "pointer-events-none scale-95 opacity-0 hidden" : "opacity-100"
-                    }`}
-                  >
-                    PulseTrack
-                  </span>
+                  {collapsed ? (
+                    <span className="sr-only">PulseTrack</span>
+                  ) : (
+                    <span className="text-sm">PulseTrack</span>
+                  )}
                 </Link>
 
                 <button
@@ -68,7 +72,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   aria-label={collapsed ? "Expandir barra lateral" : "Colapsar barra lateral"}
                   aria-expanded={!collapsed}
                   onClick={() => setCollapsed((prev) => !prev)}
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-transparent text-ink-secondary pt-motion-gpu hover:border-border-strong hover:bg-elevated hover:text-ink-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+                  className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-transparent text-ink-secondary pt-motion-gpu hover:border-border-strong hover:bg-elevated hover:text-ink-primary active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
                 >
                   <PanelLeftIcon className="h-5 w-5" />
                 </button>
@@ -83,7 +87,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                       key={item.href}
                       href={item.href}
                       aria-current={active ? "page" : undefined}
-                      className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium pt-motion-gpu active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary ${
+                      className={`flex min-h-11 items-center rounded-xl px-3 text-sm font-medium pt-motion-gpu active:scale-[0.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary ${
+                        collapsed ? "justify-center" : "gap-3"
+                      } ${
                         active
                           ? "bg-ink-primary text-void"
                           : "text-ink-secondary hover:bg-elevated hover:text-ink-primary"
@@ -101,7 +107,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Link
                 href="/login"
                 aria-current={pathname === "/login" ? "page" : undefined}
-                className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium pt-motion-gpu focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary ${
+                className={`flex min-h-11 items-center rounded-xl px-3 text-sm font-medium pt-motion-gpu active:scale-[0.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary ${
+                  collapsed ? "justify-center" : "gap-3"
+                } ${
                   pathname === "/login"
                     ? "bg-ink-primary text-void"
                     : "text-ink-secondary hover:bg-elevated hover:text-ink-primary"
@@ -120,7 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <nav
           aria-label="Navegación inferior móvil"
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-border-subtle bg-void/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-border-subtle bg-void pb-[env(safe-area-inset-bottom)] lg:hidden"
         >
           <ul className="grid grid-cols-5">
             {NAV_ITEMS.map((item) => {
@@ -131,7 +139,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Link
                     href={item.href}
                     aria-current={active ? "page" : undefined}
-                    className={`flex min-h-11 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium pt-motion-gpu active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-primary ${
+                    className={`flex min-h-11 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium pt-motion-gpu active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink-primary ${
                       active ? "text-ink-primary" : "text-ink-secondary hover:text-ink-primary"
                     }`}
                   >

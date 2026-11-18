@@ -2,6 +2,7 @@
   "name": "pulsetrack",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.1.1",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -15,6 +16,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

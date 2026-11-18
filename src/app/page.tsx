@@ -31,7 +31,7 @@ export default function HomePage() {
         </div>
         <Link
           href="/login"
-          className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-strong bg-surface px-5 text-xs font-semibold uppercase tracking-wider text-ink-primary pt-motion-gpu hover:border-ink-primary/60 hover:bg-elevated active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+          className="inline-flex min-h-11 items-center justify-center rounded-full border border-border-strong bg-surface px-5 text-xs font-semibold uppercase tracking-wider text-ink-primary pt-motion-gpu hover:border-ink-primary hover:bg-elevated active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
         >
           Acceso Vault
         </Link>

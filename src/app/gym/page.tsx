@@ -23,7 +23,7 @@ export default function GymPage() {
             resetTimer(90);
             setState("gym-timer");
           }}
-          className="min-h-11 rounded-full border border-accent-sleep/60 bg-surface px-5 text-xs font-semibold uppercase tracking-wider text-accent-sleep pt-motion-gpu hover:bg-elevated active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+          className="min-h-11 rounded-full border border-accent-sleep/70 bg-surface px-5 text-xs font-semibold uppercase tracking-wider text-accent-sleep tabular-nums pt-motion-gpu hover:bg-elevated active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
         >
           Iniciar descanso 01:30
         </button>
@@ -66,7 +66,7 @@ export default function GymPage() {
             >
               <div>
                 <p className="text-sm font-semibold text-ink-primary">{ex.name}</p>
-                <p className="text-xs text-ink-secondary">{ex.liftAiCue}</p>
+                <p className="text-xs text-ink-secondary tabular-nums">{ex.liftAiCue}</p>
               </div>
               <div className="flex items-center gap-4 text-xs text-ink-secondary tabular-nums">
                 <span>{ex.sets} series</span>

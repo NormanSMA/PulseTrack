@@ -21,7 +21,7 @@ export default function RoutesPage() {
             Viewport WebGL (LineStringZ EPSG:4326)
           </span>
           <span className="text-xs text-ink-secondary tabular-nums">
-            Render target &lt; 16 ms
+            Objetivo &lt; 16 ms (ADR-003 · benchmark en Fase 3)
           </span>
         </div>
         <p className="my-8 text-center text-sm text-ink-secondary">

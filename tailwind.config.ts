@@ -5,23 +5,23 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        void: "var(--bg-void)",
-        surface: "var(--bg-surface)",
-        elevated: "var(--bg-elevated)",
+        void: "rgb(var(--bg-void) / <alpha-value>)",
+        surface: "rgb(var(--bg-surface) / <alpha-value>)",
+        elevated: "rgb(var(--bg-elevated) / <alpha-value>)",
         border: {
-          subtle: "var(--border-subtle)",
-          strong: "var(--border-strong)",
+          subtle: "rgb(var(--border-subtle) / <alpha-value>)",
+          strong: "rgb(var(--border-strong) / <alpha-value>)",
         },
         ink: {
-          primary: "var(--fg-primary)",
-          secondary: "var(--fg-secondary)",
+          primary: "rgb(var(--fg-primary) / <alpha-value>)",
+          secondary: "rgb(var(--fg-secondary) / <alpha-value>)",
         },
         accent: {
-          recovery: "var(--accent-recovery)",
-          strain: "var(--accent-strain)",
-          sleep: "var(--accent-sleep)",
-          alert: "var(--accent-alert)",
-          danger: "var(--accent-danger)",
+          recovery: "rgb(var(--accent-recovery) / <alpha-value>)",
+          strain: "rgb(var(--accent-strain) / <alpha-value>)",
+          sleep: "rgb(var(--accent-sleep) / <alpha-value>)",
+          alert: "rgb(var(--accent-alert) / <alpha-value>)",
+          danger: "rgb(var(--accent-danger) / <alpha-value>)",
         },
       },
       fontFamily: {

@@ -20,6 +20,10 @@ export const metadata: Metadata = {
   title: "PulseTrack",
   description:
     "Telemetría biométrica, entrenamiento, rutas GPX 2D/3D, nutrición e IA híbrida.",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/apple-touch-icon.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
