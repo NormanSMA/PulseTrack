@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-void: #000000;
+  --bg-surface: #0a0a0a;
+  --bg-elevated: #121212;
+  --border-subtle: #1f1f1f;
+  --border-strong: #333333;
+  --fg-primary: #ffffff;
+  --fg-secondary: #b3b3b3;
+  --accent-recovery: #4ade80;
+  --accent-strain: #60a5fa;
+  --accent-sleep: #c084fc;
+  --accent-alert: #fbbf24;
+  --accent-danger: #f87171;
+}
+
+@layer base {
+  html,
+  body {
+    background-color: var(--bg-void);
+    color: var(--fg-primary);
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pt-motion-gpu {
+    transition-property: transform, opacity;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform, opacity;
+  }
+}
+
+@keyframes pt-opacity-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pt-pulse-opacity {
+  animation: pt-opacity-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-motion-gpu {
+    transition-duration: 1ms;
+    will-change: auto;
+  }
+
+  .pt-pulse-opacity {
+    animation: none;
+  }
+}
