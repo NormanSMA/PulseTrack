@@ -64,11 +64,12 @@ model BodyComposition {
 // 4. strength (catalog / sessions / sets con garmin_step_note)
 model StrengthCatalog {
   id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String        @map("user_id") @db.Uuid
+  userId      String?       @map("user_id") @db.Uuid
   externalId  String        @map("external_id")
   name        String
   muscleGroup String?       @map("muscle_group")
   equipment   String?
+  isPublic    Boolean       @default(false) @map("is_public")
   createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
   sets        StrengthSet[]
 

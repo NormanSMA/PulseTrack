@@ -1,6 +1,8 @@
 -- PulseTrack PostgreSQL 17 Schema (Supabase + PostGIS + pgvector)
 -- ADR-001: Autoridad unica anti-duplicados (sin Apple Health)
 
+BEGIN;
+
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -38,6 +40,7 @@ CREATE TABLE IF NOT EXISTS daily_biometrics (
     AND active_kcal >= 0
     AND resting_kcal >= 0
     AND sleep_minutes >= 0
+    AND (hrv_ms IS NULL OR (hrv_ms >= 0 AND hrv_ms <> 'NaN'::numeric))
   )
 );
 
@@ -58,7 +61,9 @@ CREATE TABLE IF NOT EXISTS body_composition (
   CONSTRAINT uq_body_composition_user_ts_source UNIQUE (user_id, measured_at, source),
   CONSTRAINT chk_body_composition_source CHECK (
     source IN ('renpho', 'garmin')
-    AND weight_kg > 0
+    AND weight_kg > 0 AND weight_kg <> 'NaN'::numeric
+    AND (body_fat_pct IS NULL OR (body_fat_pct BETWEEN 0 AND 100 AND body_fat_pct <> 'NaN'::numeric))
+    AND (muscle_mass_kg IS NULL OR (muscle_mass_kg >= 0 AND muscle_mass_kg <> 'NaN'::numeric))
   )
 );
 
@@ -68,13 +73,18 @@ CREATE INDEX IF NOT EXISTS idx_body_composition_user_measured
 -- 4. strength (catalog / sessions / sets con garmin_step_note)
 CREATE TABLE IF NOT EXISTS strength_catalog (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
+  user_id UUID,
   external_id TEXT NOT NULL,
   name TEXT NOT NULL,
   muscle_group TEXT,
   equipment TEXT,
+  is_public BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT uq_strength_catalog_user_ext UNIQUE (user_id, external_id)
+  CONSTRAINT uq_strength_catalog_user_ext UNIQUE NULLS NOT DISTINCT (user_id, external_id),
+  CONSTRAINT chk_strength_catalog_owner CHECK (
+    (is_public = true AND user_id IS NULL)
+    OR (is_public = false AND user_id IS NOT NULL)
+  )
 );
 
 CREATE TABLE IF NOT EXISTS strength_sessions (
@@ -89,7 +99,7 @@ CREATE TABLE IF NOT EXISTS strength_sessions (
   CONSTRAINT uq_strength_sessions_user_ext UNIQUE (user_id, external_id),
   CONSTRAINT chk_strength_sessions_source CHECK (
     source IN ('hevy', 'pulsetrack')
-    AND total_volume_kg >= 0
+    AND total_volume_kg >= 0 AND total_volume_kg <> 'NaN'::numeric
   )
 );
 
@@ -109,7 +119,8 @@ CREATE TABLE IF NOT EXISTS strength_sets (
   CONSTRAINT chk_strength_sets_values CHECK (
     set_index >= 0
     AND reps > 0
-    AND weight_kg >= 0
+    AND weight_kg >= 0 AND weight_kg <> 'NaN'::numeric
+    AND (rpe IS NULL OR (rpe BETWEEN 1 AND 10 AND rpe <> 'NaN'::numeric))
   )
 );
 
@@ -128,8 +139,9 @@ CREATE TABLE IF NOT EXISTS gpx_routes (
   CONSTRAINT uq_gpx_routes_user_ext UNIQUE (user_id, external_id),
   CONSTRAINT chk_gpx_routes_source CHECK (
     source IN ('garmin', 'gpx_upload')
-    AND distance_m >= 0
-    AND elevation_gain_m >= 0
+    AND distance_m >= 0 AND distance_m <> 'NaN'::numeric
+    AND elevation_gain_m >= 0 AND elevation_gain_m <> 'NaN'::numeric
+    AND (gap_pace_sec_km IS NULL OR (gap_pace_sec_km > 0 AND gap_pace_sec_km <> 'NaN'::numeric))
   )
 );
 
@@ -157,10 +169,10 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
   CONSTRAINT uq_nutrition_logs_user_ts_food_slot UNIQUE (user_id, logged_at, food_name, meal_slot),
   CONSTRAINT chk_nutrition_logs_source CHECK (
     source = 'pulsetrack'
-    AND kcal >= 0
-    AND protein_g >= 0
-    AND carbs_g >= 0
-    AND fat_g >= 0
+    AND kcal >= 0 AND kcal <> 'NaN'::numeric
+    AND protein_g >= 0 AND protein_g <> 'NaN'::numeric
+    AND carbs_g >= 0 AND carbs_g <> 'NaN'::numeric
+    AND fat_g >= 0 AND fat_g <> 'NaN'::numeric
   )
 );
 
@@ -183,8 +195,8 @@ CREATE TABLE IF NOT EXISTS ai_predictions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_ai_predictions_user_date_model UNIQUE (user_id, target_date, model_version),
   CONSTRAINT chk_ai_predictions_bounds CHECK (
-    readiness_score BETWEEN 0 AND 100
-    AND acwr >= 0
+    readiness_score BETWEEN 0 AND 100 AND readiness_score <> 'NaN'::numeric
+    AND acwr >= 0 AND acwr <> 'NaN'::numeric
   )
 );
 
@@ -227,23 +239,72 @@ ALTER TABLE nutrition_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_telemetry_logs ENABLE ROW LEVEL SECURITY;
 
+-- oauth_vault
+DROP POLICY IF EXISTS p_oauth_vault_owner ON oauth_vault;
 CREATE POLICY p_oauth_vault_owner ON oauth_vault
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY p_daily_biometrics_owner ON daily_biometrics
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+-- daily_biometrics: lectura para authenticated; escritura exclusiva para service_role (ingesta Garmin)
+DROP POLICY IF EXISTS p_daily_biometrics_owner ON daily_biometrics;
+DROP POLICY IF EXISTS p_daily_biometrics_select_authenticated ON daily_biometrics;
+DROP POLICY IF EXISTS p_daily_biometrics_write_service_role ON daily_biometrics;
 
+CREATE POLICY p_daily_biometrics_select_authenticated ON daily_biometrics
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY p_daily_biometrics_write_service_role ON daily_biometrics
+  FOR ALL TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+REVOKE INSERT, UPDATE, DELETE ON daily_biometrics FROM authenticated, anon;
+
+-- body_composition
+DROP POLICY IF EXISTS p_body_composition_owner ON body_composition;
 CREATE POLICY p_body_composition_owner ON body_composition
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY p_strength_catalog_owner ON strength_catalog
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+-- strength_catalog: lectura propia o catalogo publico base; escritura solo propia (no publica)
+DROP POLICY IF EXISTS p_strength_catalog_owner ON strength_catalog;
+DROP POLICY IF EXISTS p_strength_catalog_select ON strength_catalog;
+DROP POLICY IF EXISTS p_strength_catalog_insert ON strength_catalog;
+DROP POLICY IF EXISTS p_strength_catalog_update ON strength_catalog;
+DROP POLICY IF EXISTS p_strength_catalog_delete ON strength_catalog;
 
+CREATE POLICY p_strength_catalog_select ON strength_catalog
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id OR is_public = true);
+
+CREATE POLICY p_strength_catalog_insert ON strength_catalog
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id AND is_public = false);
+
+CREATE POLICY p_strength_catalog_update ON strength_catalog
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id AND is_public = false);
+
+CREATE POLICY p_strength_catalog_delete ON strength_catalog
+  FOR DELETE TO authenticated
+  USING (auth.uid() = user_id AND is_public = false);
+
+-- strength_sessions
+DROP POLICY IF EXISTS p_strength_sessions_owner ON strength_sessions;
 CREATE POLICY p_strength_sessions_owner ON strength_sessions
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
+-- strength_sets: valida propiedad de session_id y propiedad/catalogo publico de exercise_id
+DROP POLICY IF EXISTS p_strength_sets_owner ON strength_sets;
 CREATE POLICY p_strength_sets_owner ON strength_sets
-  FOR ALL USING (
+  FOR ALL TO authenticated
+  USING (
     EXISTS (
       SELECT 1 FROM strength_sessions s
       WHERE s.id = strength_sets.session_id AND s.user_id = auth.uid()
@@ -254,16 +315,39 @@ CREATE POLICY p_strength_sets_owner ON strength_sets
       SELECT 1 FROM strength_sessions s
       WHERE s.id = strength_sets.session_id AND s.user_id = auth.uid()
     )
+    AND EXISTS (
+      SELECT 1 FROM strength_catalog c
+      WHERE c.id = strength_sets.exercise_id
+        AND (c.user_id = auth.uid() OR c.is_public = true)
+    )
   );
 
+-- gpx_routes
+DROP POLICY IF EXISTS p_gpx_routes_owner ON gpx_routes;
 CREATE POLICY p_gpx_routes_owner ON gpx_routes
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
+-- nutrition_logs
+DROP POLICY IF EXISTS p_nutrition_logs_owner ON nutrition_logs;
 CREATE POLICY p_nutrition_logs_owner ON nutrition_logs
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
+-- ai_predictions
+DROP POLICY IF EXISTS p_ai_predictions_owner ON ai_predictions;
 CREATE POLICY p_ai_predictions_owner ON ai_predictions
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
+-- ai_telemetry_logs
+DROP POLICY IF EXISTS p_ai_telemetry_logs_owner ON ai_telemetry_logs;
 CREATE POLICY p_ai_telemetry_logs_owner ON ai_telemetry_logs
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+COMMIT;
