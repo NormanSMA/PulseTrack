@@ -1,0 +1,27 @@
+name: Reentrenamiento semanal ONNX
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install 'polars>=1,<2' 'pytest>=8,<10' 'onnx>=1.16,<2'
+      - run: pytest services/ml/tests/ -v
+      - run: python -m services.ml.factory pulsetrack-readiness.onnx
+      - run: python -c "from onnx import checker; checker.check_model('pulsetrack-readiness.onnx', full_check=True)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pulsetrack-readiness-onnx
+          path: pulsetrack-readiness.onnx
+          if-no-files-found: error
