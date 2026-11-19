@@ -297,3 +297,54 @@ def test_fastapi_endpoints_end_to_end() -> None:
     assert weather_body["ok"] is True
     assert weather_body["weather"]["source"] == "fixture"
     assert json.loads(weather_fixture.text)["weather"]["weather_humidity_pct"] == 64.0
+
+
+def test_service_token_enforcement_and_user_id_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(ingest_main.app)
+
+    # Modo live sin PULSETRACK_SERVICE_SECRET debe fallar cerrado (503)
+    monkeypatch.setenv("INGEST_MODE", "live")
+    monkeypatch.delenv("PULSETRACK_SERVICE_SECRET", raising=False)
+    live_no_secret = client.post(
+        "/v1/sync/garmin",
+        json={"user_id": "auth-user", "source": "garmin", "use_fixture": True},
+    )
+    assert live_no_secret.status_code == 503
+
+    # Con secreto definido, exige X-Service-Token valido
+    monkeypatch.setenv("PULSETRACK_SERVICE_SECRET", "super-secret-ingest-key")
+    unauth = client.post(
+        "/v1/sync/garmin",
+        json={"user_id": "auth-user", "source": "garmin", "use_fixture": True},
+    )
+    assert unauth.status_code == 401
+
+    wrong_token = client.post(
+        "/v1/sync/renpho",
+        headers={"X-Service-Token": "wrong-token"},
+        json={"user_id": "auth-user", "source": "renpho", "use_fixture": True},
+    )
+    assert wrong_token.status_code == 401
+
+    # Con token valido, filas internas no pueden suplantar user_id
+    ok_res = client.post(
+        "/v1/sync/garmin",
+        headers={"X-Service-Token": "super-secret-ingest-key"},
+        json={
+            "user_id": "auth-user",
+            "source": "garmin",
+            "use_fixture": False,
+            "records": [
+                {
+                    "user_id": "attacker-id",
+                    "date": "2026-11-18",
+                    "source": "garmin",
+                    "active_kcal": 500,
+                    "resting_kcal": 1750,
+                    "sleep_minutes": 440,
+                }
+            ],
+        },
+    )
+    assert ok_res.status_code == 200
+    assert ok_res.json()["records"][0]["user_id"] == "auth-user"

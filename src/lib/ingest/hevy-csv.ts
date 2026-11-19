@@ -130,12 +130,20 @@ function roundKg(value: number): number {
   return cents < Number.MAX_SAFE_INTEGER ? Math.round(cents + cents * Number.EPSILON) / 100 : value;
 }
 
+const MAX_CSV_ROWS = 50_000;
+const MAX_WARNINGS = 50;
+
 export function parseHevyCsv(csvText: string): HevyParseResult {
   const result: HevyParseResult = {
     sessions: [], exercisesCount: 0, setsCount: 0, duplicatesSkipped: 0, rejectedRows: 0, warnings: [],
   };
-  const [header, ...rows] = readCsv(csvText);
+  const [header, ...rawRows] = readCsv(csvText);
   if (!header) return result;
+  const rows = rawRows.slice(0, MAX_CSV_ROWS);
+  if (rawRows.length > MAX_CSV_ROWS) {
+    result.rejectedRows += rawRows.length - MAX_CSV_ROWS;
+    result.warnings.push(`Archivo truncado a ${MAX_CSV_ROWS} filas para proteger memoria.`);
+  }
 
   const headers = header.fields.map((field) => slug(field).replace(/-/g, "_"));
   const columns = new Map<Column, number>();
@@ -161,7 +169,9 @@ export function parseHevyCsv(csvText: string): HevyParseResult {
   for (const row of rows) {
     const reject = (reason: string) => {
       result.rejectedRows++;
-      result.warnings.push(`Línea ${row.line}: ${reason}.`);
+      if (result.warnings.length < MAX_WARNINGS) {
+        result.warnings.push(`Línea ${row.line}: ${reason}.`);
+      }
     };
     if (row.malformed || row.fields.length !== headers.length) {
       reject("fila CSV malformada");
@@ -254,6 +264,7 @@ export function parseHevyCsv(csvText: string): HevyParseResult {
       session.exerciseIds.add(exerciseExternalId);
     }
 
+    // Al exportar estos textos a CSV/hojas de calculo en fases futuras, prefijar celdas (=, +, -, @).
     const notesText = read("exercise_notes");
     const notes = notesText.trim() ? notesText : null;
     const garminStepNote = [exerciseName, rpe === null ? "" : `RPE ${rpe}`, notes ?? ""]

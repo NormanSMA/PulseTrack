@@ -20,12 +20,14 @@ describe("API routes de ingesta y check-in (ADR-001)", () => {
     vi.setSystemTime(new Date("2026-11-18T12:00:00.000Z"));
     parseHevyCsvMock.mockReset();
     delete process.env.INGEST_SERVICE_URL;
+    delete process.env.INGEST_MODE;
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     delete process.env.INGEST_SERVICE_URL;
+    delete process.env.INGEST_MODE;
   });
 
   describe("POST /api/ingest/hevy", () => {
@@ -190,11 +192,13 @@ describe("API routes de ingesta y check-in (ADR-001)", () => {
 
     it("consulta INGEST_SERVICE_URL cuando esta definido en entorno", async () => {
       process.env.INGEST_SERVICE_URL = "http://ingest.local:8000";
+      process.env.INGEST_MODE = "live";
       const fetchMock = vi.fn().mockResolvedValue(
         new Response(
           JSON.stringify({
             ok: true,
             authority: "garmin",
+            mode: "live",
             records: [
               {
                 date: "2026-11-18",

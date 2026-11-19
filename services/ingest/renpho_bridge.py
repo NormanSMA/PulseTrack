@@ -110,6 +110,9 @@ def bridge_renpho_records(
     """Valida mediciones RENPHO con Polars, deduplica e inyecta synced_to_garmin = true."""
     valid_rows: list[dict[str, Any]] = []
     rejected_reasons: list[str] = []
+    verified_user_id = user_id.strip()
+    if not verified_user_id:
+        raise AuthorityViolationError("user_id es obligatorio para puente RENPHO.")
 
     for idx, row in enumerate(records):
         source = _validate_body_source(row.get("source", "renpho"))
@@ -162,7 +165,7 @@ def bridge_renpho_records(
 
         valid_rows.append(
             {
-                "user_id": str(row.get("user_id") or user_id).strip(),
+                "user_id": verified_user_id,
                 "measured_at": measured_at,
                 "source": source,
                 "weight_kg": weight_kg,

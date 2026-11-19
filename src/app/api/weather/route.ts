@@ -4,6 +4,8 @@ import { WEATHER_TTL_MS } from "@/lib/ingest/swr-policy";
 const DEFAULT_LAT = 12.1364;
 const DEFAULT_LON = -86.2514;
 const OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast";
+const MAX_CACHE_ENTRIES = 100;
+const FORCE_COOLDOWN_MS = 60_000;
 
 interface WeatherData {
   latitude: number;
@@ -85,20 +87,23 @@ export async function GET(request: Request): Promise<NextResponse> {
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
-  if (!forceRefresh) {
-    const cached = weatherCache.get(cacheKey);
-    if (cached && nowMs - cached.fetchedAtMs < WEATHER_TTL_MS) {
-      const remainingTtlMs = Math.max(0, WEATHER_TTL_MS - (nowMs - cached.fetchedAtMs));
+  const existingCached = weatherCache.get(cacheKey);
+  if (existingCached) {
+    const ageMs = nowMs - existingCached.fetchedAtMs;
+    const withinNormalTtl = !forceRefresh && ageMs < WEATHER_TTL_MS;
+    const withinForceCooldown = forceRefresh && ageMs < FORCE_COOLDOWN_MS;
+    if (withinNormalTtl || withinForceCooldown) {
+      const remainingTtlMs = Math.max(0, WEATHER_TTL_MS - ageMs);
       return NextResponse.json(
         {
           ok: true,
-          weather: cached.weather,
+          weather: existingCached.weather,
           cached: true,
           fallback: false,
           source: "open-meteo",
           ttlMs: WEATHER_TTL_MS,
           remainingTtlMs,
-          fetchedAt: cached.fetchedAt,
+          fetchedAt: existingCached.fetchedAt,
         },
         { status: 200 },
       );
@@ -160,6 +165,14 @@ export async function GET(request: Request): Promise<NextResponse> {
       observedAt: typeof current.time === "string" ? current.time : nowIso,
     };
 
+    if (weatherCache.has(cacheKey)) {
+      weatherCache.delete(cacheKey);
+    } else if (weatherCache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = weatherCache.keys().next().value;
+      if (typeof oldestKey === "string") {
+        weatherCache.delete(oldestKey);
+      }
+    }
     weatherCache.set(cacheKey, {
       fetchedAtMs: nowMs,
       fetchedAt: nowIso,

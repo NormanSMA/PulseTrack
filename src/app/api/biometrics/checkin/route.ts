@@ -5,6 +5,7 @@ import {
 } from "@/lib/ingest/swr-policy";
 
 interface SubjectiveCheckinRecord {
+  actorKey: string;
   date: string;
   subjEnergy: number;
   subjSoreness: number;
@@ -12,7 +13,16 @@ interface SubjectiveCheckinRecord {
   updatedAt: string;
 }
 
+// Almacen temporal por actor:fecha hasta enlazar Supabase Auth/Postgres en despliegue
 const checkinStore = new Map<string, SubjectiveCheckinRecord>();
+
+function resolveActorKey(request: Request): string {
+  const headerUser = request.headers.get("x-user-id")?.trim();
+  if (headerUser && headerUser.length > 0 && headerUser.length <= 64) {
+    return headerUser;
+  }
+  return "local-owner";
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,15 +106,17 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     date = body.date;
   }
 
+  const actorKey = resolveActorKey(request);
   const updatedAt = new Date().toISOString();
   const record: SubjectiveCheckinRecord = {
+    actorKey,
     date,
     subjEnergy,
     subjSoreness,
     subjMood,
     updatedAt,
   };
-  checkinStore.set(date, record);
+  checkinStore.set(`${actorKey}:${date}`, record);
 
   return NextResponse.json(
     {

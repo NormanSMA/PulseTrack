@@ -16,6 +16,7 @@ class IngestSettings:
     default_longitude: float
     supabase_url: str | None
     supabase_service_role_key: str | None
+    service_secret: str | None
 
 
 def load_settings() -> IngestSettings:
@@ -38,6 +39,9 @@ def load_settings() -> IngestSettings:
     except ValueError:
         default_longitude = -86.2514
 
+    service_secret_raw = os.getenv("PULSETRACK_SERVICE_SECRET")
+    service_secret = service_secret_raw.strip() if service_secret_raw and service_secret_raw.strip() else None
+
     return IngestSettings(
         mode=mode,
         vault_key_env=os.getenv("PULSETRACK_VAULT_KEY"),
@@ -50,4 +54,5 @@ def load_settings() -> IngestSettings:
         default_longitude=default_longitude,
         supabase_url=os.getenv("SUPABASE_URL"),
         supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
+        service_secret=service_secret,
     )

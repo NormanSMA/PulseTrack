@@ -30,6 +30,9 @@ import type {
 export const STALE_WINDOW_MS = 15 * 60 * 1000;
 export const WEATHER_TTL_MS = 60 * 60 * 1000;
 
+let flushInFlight: Promise<FlushQueueResult> | null = null;
+let syncInFlight: Promise<SyncExecutionResult> | null = null;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -131,8 +134,14 @@ function mergeBiometricsFromUnknown(
   if (!isRecord(raw)) {
     return fallback;
   }
+  const nextDate = readString(raw, "date", "record_date") ?? fallback.date;
+  const sameDate = nextDate === fallback.date;
+  const serverEnergy = readNumber(raw, "subjEnergy", "subj_energy");
+  const serverSoreness = readNumber(raw, "subjSoreness", "subj_soreness");
+  const serverMood = readNumber(raw, "subjMood", "subj_mood");
+
   return {
-    date: readString(raw, "date", "record_date") ?? fallback.date,
+    date: nextDate,
     recoveryScore: readNumber(raw, "recoveryScore", "recovery_score") ?? fallback.recoveryScore,
     recoveryDelta: readString(raw, "recoveryDelta", "recovery_delta") ?? fallback.recoveryDelta,
     hrvMs: readNumber(raw, "hrvMs", "hrv_ms") ?? fallback.hrvMs,
@@ -157,9 +166,9 @@ function mergeBiometricsFromUnknown(
     campPressureHpa:
       readNumber(raw, "campPressureHpa", "camp_pressure_hpa") ?? fallback.campPressureHpa,
     campActiveKcal: 0,
-    subjEnergy: readNumber(raw, "subjEnergy", "subj_energy") ?? fallback.subjEnergy,
-    subjSoreness: readNumber(raw, "subjSoreness", "subj_soreness") ?? fallback.subjSoreness,
-    subjMood: readNumber(raw, "subjMood", "subj_mood") ?? fallback.subjMood,
+    subjEnergy: sameDate ? (fallback.subjEnergy ?? serverEnergy) : serverEnergy,
+    subjSoreness: sameDate ? (fallback.subjSoreness ?? serverSoreness) : serverSoreness,
+    subjMood: sameDate ? (fallback.subjMood ?? serverMood) : serverMood,
     source: readString(raw, "source") ?? fallback.source,
     updatedAt: readString(raw, "updatedAt", "updated_at") ?? nowIso,
   };
@@ -335,78 +344,90 @@ export interface FlushQueueResult {
 }
 
 export async function flushSyncQueue(): Promise<FlushQueueResult> {
-  const items = await listQueueItems();
-  if (items.length === 0) {
-    return { flushed: 0, remaining: 0, failed: 0 };
+  if (flushInFlight) {
+    return flushInFlight;
   }
-  if (!isNavigatorOnline()) {
-    return { flushed: 0, remaining: items.length, failed: 0 };
-  }
-
-  let flushed = 0;
-  let failed = 0;
-  const nowIso = new Date().toISOString();
-
-  for (const item of items) {
-    if (item.status === "failed" && item.attempts >= 3) {
-      failed += 1;
-      continue;
+  const run = (async (): Promise<FlushQueueResult> => {
+    const items = await listQueueItems();
+    if (items.length === 0) {
+      return { flushed: 0, remaining: 0, failed: 0 };
+    }
+    if (!isNavigatorOnline()) {
+      return { flushed: 0, remaining: items.length, failed: 0 };
     }
 
-    try {
-      const bodyPayload =
-        item.kind === "subjective_checkin"
-          ? JSON.stringify(item.payload)
-          : JSON.stringify({ csv: item.payload.csv });
+    let flushed = 0;
+    let failed = 0;
+    const nowIso = new Date().toISOString();
 
-      const res = await fetch(item.endpoint, {
-        method: item.method,
-        headers: { "Content-Type": "application/json" },
-        body: bodyPayload,
-      });
+    for (const item of items) {
+      if (item.status === "failed" && item.attempts >= 3) {
+        failed += 1;
+        continue;
+      }
 
-      if (res.ok) {
-        if (item.kind === "hevy_csv") {
-          const data: unknown = await res.json().catch(() => null);
-          if (isRecord(data) && Array.isArray(data.sessions)) {
-            const sessions = parseHevySessionsFromUnknown(data.sessions, nowIso);
-            if (sessions.length > 0) {
-              await upsertHevySessions(sessions);
+      try {
+        const bodyPayload =
+          item.kind === "subjective_checkin"
+            ? JSON.stringify(item.payload)
+            : JSON.stringify({ csv: item.payload.csv });
+
+        const res = await fetch(item.endpoint, {
+          method: item.method,
+          headers: { "Content-Type": "application/json" },
+          body: bodyPayload,
+        });
+
+        if (res.ok) {
+          if (item.kind === "hevy_csv") {
+            const data: unknown = await res.json().catch(() => null);
+            if (isRecord(data) && Array.isArray(data.sessions)) {
+              const sessions = parseHevySessionsFromUnknown(data.sessions, nowIso);
+              if (sessions.length > 0) {
+                await upsertHevySessions(sessions);
+              }
             }
           }
+          await removeQueueItem(item.id);
+          flushed += 1;
+        } else {
+          const isClientRejection = res.status >= 400 && res.status < 500;
+          const nextItem: SyncQueueItem = {
+            ...item,
+            attempts: item.attempts + 1,
+            lastError: `HTTP ${res.status}`,
+            status: isClientRejection ? "failed" : "pending",
+          };
+          await updateQueueItem(nextItem);
+          if (isClientRejection) {
+            failed += 1;
+          }
         }
-        await removeQueueItem(item.id);
-        flushed += 1;
-      } else {
-        const isClientRejection = res.status >= 400 && res.status < 500;
-        const nextItem: SyncQueueItem = {
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Error de red";
+        await updateQueueItem({
           ...item,
           attempts: item.attempts + 1,
-          lastError: `HTTP ${res.status}`,
-          status: isClientRejection ? "failed" : "pending",
-        };
-        await updateQueueItem(nextItem);
-        if (isClientRejection) {
-          failed += 1;
-        }
+          lastError: message,
+          status: "pending",
+        });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Error de red";
-      await updateQueueItem({
-        ...item,
-        attempts: item.attempts + 1,
-        lastError: message,
-        status: "pending",
-      });
     }
-  }
 
-  const remainingItems = await listQueueItems();
-  return {
-    flushed,
-    remaining: remainingItems.length,
-    failed,
-  };
+    const remainingItems = await listQueueItems();
+    return {
+      flushed,
+      remaining: remainingItems.length,
+      failed,
+    };
+  })();
+
+  flushInFlight = run;
+  try {
+    return await run;
+  } finally {
+    flushInFlight = null;
+  }
 }
 
 export interface CheckinSubmitResult {
@@ -617,145 +638,157 @@ export async function syncIfStale(
   force = false,
   nowMs = Date.now(),
 ): Promise<SyncExecutionResult> {
-  const current = await readSnapshot();
-  const stale = isSyncStale(current.meta.lastSyncAt, nowMs);
-
-  if (!force && !stale) {
-    return {
-      synced: false,
-      skippedDueToSWR: true,
-      offline: false,
-      snapshot: current,
-      error: null,
-    };
+  if (syncInFlight) {
+    return syncInFlight;
   }
+  const run = (async (): Promise<SyncExecutionResult> => {
+    const current = await readSnapshot();
+    const stale = isSyncStale(current.meta.lastSyncAt, nowMs);
 
-  if (!isNavigatorOnline()) {
-    return {
-      synced: false,
-      skippedDueToSWR: false,
-      offline: true,
-      snapshot: current,
-      error: "Modo offline activo",
-    };
-  }
+    if (!force && !stale) {
+      return {
+        synced: false,
+        skippedDueToSWR: true,
+        offline: false,
+        snapshot: current,
+        error: null,
+      };
+    }
 
-  await flushSyncQueue();
+    if (!isNavigatorOnline()) {
+      return {
+        synced: false,
+        skippedDueToSWR: false,
+        offline: true,
+        snapshot: current,
+        error: "Modo offline activo",
+      };
+    }
 
-  const nowIso = new Date(nowMs).toISOString();
+    await flushSyncQueue();
 
-  try {
-    const [syncRes, weatherRes] = await Promise.all([
-      fetch("/api/ingest/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force }),
-      }),
-      fetch("/api/weather", { method: "GET" }).catch(() => null),
-    ]);
+    const nowIso = new Date(nowMs).toISOString();
 
-    if (!syncRes.ok) {
-      const errBody: unknown = await syncRes.json().catch(() => null);
-      const errMsg = readErrorMessage(errBody, `Sincronizacion rechazada (${syncRes.status})`);
-      const failedMeta: SyncMetaView = {
+    try {
+      const [syncRes, weatherRes] = await Promise.all([
+        fetch("/api/ingest/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force }),
+        }),
+        fetch("/api/weather", { method: "GET" }).catch(() => null),
+      ]);
+
+      if (!syncRes.ok) {
+        const errBody: unknown = await syncRes.json().catch(() => null);
+        const errMsg = readErrorMessage(errBody, `Sincronizacion rechazada (${syncRes.status})`);
+        const failedMeta: SyncMetaView = {
+          ...current.meta,
+          id: META_KEY,
+          lastError: errMsg,
+        };
+        await upsertSyncMeta(failedMeta);
+        const updated = await readSnapshot();
+        return {
+          synced: false,
+          skippedDueToSWR: false,
+          offline: false,
+          snapshot: updated,
+          error: errMsg,
+        };
+      }
+
+      const syncJson: unknown = await syncRes.json().catch(() => null);
+      const refreshed = await readSnapshot();
+      const payloadRoot =
+        isRecord(syncJson) && isRecord(syncJson.snapshot) ? syncJson.snapshot : syncJson;
+
+      const rawBiometrics = isRecord(payloadRoot)
+        ? payloadRoot.biometrics ?? payloadRoot.dailyBiometrics ?? payloadRoot
+        : null;
+      const rawBody = isRecord(payloadRoot) ? payloadRoot.bodyComposition : null;
+      const rawHevy = isRecord(payloadRoot) ? payloadRoot.hevySessions : null;
+
+      let nextBiometrics = mergeBiometricsFromUnknown(
+        rawBiometrics,
+        refreshed.biometrics,
+        nowIso,
+      );
+
+      const hasPendingCheckin = refreshed.pendingQueue.some(
+        (item) => item.kind === "subjective_checkin",
+      );
+      if (hasPendingCheckin) {
+        nextBiometrics = {
+          ...nextBiometrics,
+          subjEnergy: refreshed.biometrics.subjEnergy,
+          subjSoreness: refreshed.biometrics.subjSoreness,
+          subjMood: refreshed.biometrics.subjMood,
+        };
+      }
+
+      const nextBody = mergeBodyCompositionFromUnknown(
+        rawBody,
+        refreshed.bodyComposition,
+        nowIso,
+      );
+
+      let nextWeather = refreshed.weather;
+      if (weatherRes && weatherRes.ok) {
+        const weatherJson: unknown = await weatherRes.json().catch(() => null);
+        nextWeather = parseWeatherFromUnknown(weatherJson, refreshed.weather, nowIso);
+      } else if (isRecord(payloadRoot) && payloadRoot.weather) {
+        nextWeather = parseWeatherFromUnknown(payloadRoot.weather, refreshed.weather, nowIso);
+      }
+
+      const nextHevy = rawHevy ? parseHevySessionsFromUnknown(rawHevy, nowIso) : undefined;
+
+      const nextMeta: SyncMetaView = {
+        id: META_KEY,
+        lastSyncAt: nowIso,
+        lastWeatherAt: nextWeather ? nextWeather.fetchedAt : refreshed.meta.lastWeatherAt,
+        lastSource: nextBiometrics.source,
+        lastError: null,
+        pendingCount: refreshed.pendingQueue.length,
+      };
+
+      const updatedSnapshot = await writeSnapshotAtomic({
+        biometrics: nextBiometrics,
+        bodyComposition: nextBody,
+        weather: nextWeather,
+        hevySessions: nextHevy,
+        meta: nextMeta,
+      });
+
+      return {
+        synced: true,
+        skippedDueToSWR: false,
+        offline: false,
+        snapshot: updatedSnapshot,
+        error: null,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Error de red";
+      await upsertSyncMeta({
         ...current.meta,
         id: META_KEY,
-        lastError: errMsg,
-      };
-      await upsertSyncMeta(failedMeta);
+        lastError: message,
+      });
       const updated = await readSnapshot();
       return {
         synced: false,
         skippedDueToSWR: false,
         offline: false,
         snapshot: updated,
-        error: errMsg,
+        error: message,
       };
     }
+  })();
 
-    const syncJson: unknown = await syncRes.json().catch(() => null);
-    const refreshed = await readSnapshot();
-    const payloadRoot =
-      isRecord(syncJson) && isRecord(syncJson.snapshot) ? syncJson.snapshot : syncJson;
-
-    const rawBiometrics = isRecord(payloadRoot)
-      ? payloadRoot.biometrics ?? payloadRoot.dailyBiometrics ?? payloadRoot
-      : null;
-    const rawBody = isRecord(payloadRoot) ? payloadRoot.bodyComposition : null;
-    const rawHevy = isRecord(payloadRoot) ? payloadRoot.hevySessions : null;
-
-    let nextBiometrics = mergeBiometricsFromUnknown(
-      rawBiometrics,
-      refreshed.biometrics,
-      nowIso,
-    );
-
-    const hasPendingCheckin = refreshed.pendingQueue.some(
-      (item) => item.kind === "subjective_checkin",
-    );
-    if (hasPendingCheckin) {
-      nextBiometrics = {
-        ...nextBiometrics,
-        subjEnergy: refreshed.biometrics.subjEnergy,
-        subjSoreness: refreshed.biometrics.subjSoreness,
-        subjMood: refreshed.biometrics.subjMood,
-      };
-    }
-
-    const nextBody = mergeBodyCompositionFromUnknown(
-      rawBody,
-      refreshed.bodyComposition,
-      nowIso,
-    );
-
-    let nextWeather = refreshed.weather;
-    if (weatherRes && weatherRes.ok) {
-      const weatherJson: unknown = await weatherRes.json().catch(() => null);
-      nextWeather = parseWeatherFromUnknown(weatherJson, refreshed.weather, nowIso);
-    } else if (isRecord(payloadRoot) && payloadRoot.weather) {
-      nextWeather = parseWeatherFromUnknown(payloadRoot.weather, refreshed.weather, nowIso);
-    }
-
-    const nextHevy = rawHevy ? parseHevySessionsFromUnknown(rawHevy, nowIso) : undefined;
-
-    const nextMeta: SyncMetaView = {
-      id: META_KEY,
-      lastSyncAt: nowIso,
-      lastWeatherAt: nextWeather ? nextWeather.fetchedAt : refreshed.meta.lastWeatherAt,
-      lastSource: nextBiometrics.source,
-      lastError: null,
-      pendingCount: refreshed.pendingQueue.length,
-    };
-
-    const updatedSnapshot = await writeSnapshotAtomic({
-      biometrics: nextBiometrics,
-      bodyComposition: nextBody,
-      weather: nextWeather,
-      hevySessions: nextHevy,
-      meta: nextMeta,
-    });
-
-    return {
-      synced: true,
-      skippedDueToSWR: false,
-      offline: false,
-      snapshot: updatedSnapshot,
-      error: null,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Error de red";
-    await upsertSyncMeta({
-      ...current.meta,
-      id: META_KEY,
-      lastError: message,
-    });
-    const updated = await readSnapshot();
-    return {
-      synced: false,
-      skippedDueToSWR: false,
-      offline: false,
-      snapshot: updated,
-      error: message,
-    };
+  syncInFlight = run;
+  try {
+    return await run;
+  } finally {
+    syncInFlight = null;
   }
 }

@@ -10,8 +10,14 @@ import {
 interface BiometricSnapshot {
   date: string;
   source: "garmin";
+  recoveryScore: number;
+  strainScore: number;
+  acwr: number;
+  sleepEfficiencyPct: number;
   activeKcal: number;
   restingKcal: number;
+  caloriesConsumed: number;
+  caloriesTarget: number;
   sleepMinutes: number;
   hrvMs: number;
   restingHr: number;
@@ -58,8 +64,14 @@ function buildDeterministicSnapshot(updatedAt: string, date = "2026-11-18"): Syn
     biometrics: {
       date,
       source: "garmin",
+      recoveryScore: 86,
+      strainScore: 14.2,
+      acwr: 1.08,
+      sleepEfficiencyPct: 92,
       activeKcal: 620,
       restingKcal: 1780,
+      caloriesConsumed: 2180,
+      caloriesTarget: 2500,
       sleepMinutes: 462,
       hrvMs: 68.5,
       restingHr: 51,
@@ -71,9 +83,9 @@ function buildDeterministicSnapshot(updatedAt: string, date = "2026-11-18"): Syn
       campFalseActiveKcal: 0,
       weatherTempC: 27.4,
       weatherHumidityPct: 64.0,
-      subjEnergy: 4,
-      subjSoreness: 2,
-      subjMood: 5,
+      subjEnergy: null,
+      subjSoreness: null,
+      subjMood: null,
       updatedAt,
     },
     bodyComposition: {
@@ -206,14 +218,23 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (ingestServiceUrl) {
     try {
       const endpoint = `${ingestServiceUrl.replace(/\/+$/, "")}/v1/sync/garmin`;
+      const useFixture = process.env.INGEST_MODE?.trim().toLowerCase() !== "live";
+      const serviceSecret = process.env.PULSETRACK_SERVICE_SECRET?.trim();
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+      };
+      if (serviceSecret) {
+        headers["x-service-token"] = serviceSecret;
+      }
+
       const upstream = await fetch(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({
           source: "garmin",
           date: requestedDate ?? baseSnapshot.biometrics.date,
           force,
-          use_fixture: true,
+          use_fixture: useFixture,
         }),
         signal: AbortSignal.timeout(4000),
       });
@@ -266,9 +287,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         };
       }
 
+      const reportedMode =
+        isPlainRecord(upstreamJson) && upstreamJson.mode === "live" ? "live" : "fixture";
       syncState.snapshot = baseSnapshot;
       syncState.lastSyncAt = nowIso;
-      syncState.mode = "live";
+      syncState.mode = reportedMode;
       syncState.fallback = false;
     } catch (err: unknown) {
       if (err instanceof BiometricAuthorityError) {

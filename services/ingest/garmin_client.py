@@ -151,10 +151,14 @@ def normalize_garmin_biometrics(
         raise BiometricValidationError("Se requiere al menos un registro de biometria Garmin.")
 
     cleaned_rows: list[dict[str, Any]] = []
+    verified_user_id = user_id.strip()
+    if not verified_user_id:
+        raise BiometricValidationError("user_id es obligatorio para sincronizar biometria Garmin.")
+
     for row in records:
         source = assert_garmin_authority(row.get("source", "garmin"))
         day_raw = str(row.get("date") or date_type.today().isoformat()).strip()
-        row_user = str(row.get("user_id") or user_id).strip()
+        row_user = verified_user_id
 
         active_kcal = _require_non_negative_int(row.get("active_kcal", 0), "active_kcal")
         resting_kcal = _require_non_negative_int(row.get("resting_kcal", 0), "resting_kcal")

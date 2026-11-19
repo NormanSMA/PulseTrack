@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hmac
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .config import load_settings
@@ -31,6 +32,25 @@ app = FastAPI(
     title="PulseTrack Ingest Service",
     version="0.2.0",
 )
+
+
+def _verify_service_token(
+    x_service_token: str | None = Header(default=None, alias="X-Service-Token"),
+) -> None:
+    runtime_settings = load_settings()
+    expected = runtime_settings.service_secret
+    if runtime_settings.mode == "live" and not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="PULSETRACK_SERVICE_SECRET es obligatorio cuando INGEST_MODE=live.",
+        )
+    if expected:
+        provided = (x_service_token or "").strip()
+        if not provided or not hmac.compare_digest(provided, expected):
+            raise HTTPException(
+                status_code=401,
+                detail="Token de servicio X-Service-Token ausente o invalido.",
+            )
 
 
 class GarminSyncRequest(BaseModel):
@@ -60,7 +80,7 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/v1/sync/garmin")
+@app.post("/v1/sync/garmin", dependencies=[Depends(_verify_service_token)])
 def post_sync_garmin(payload: GarminSyncRequest) -> dict[str, Any]:
     try:
         result = sync_garmin(
@@ -86,7 +106,7 @@ def post_sync_garmin(payload: GarminSyncRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/v1/sync/renpho")
+@app.post("/v1/sync/renpho", dependencies=[Depends(_verify_service_token)])
 def post_sync_renpho(payload: RenphoSyncRequest) -> dict[str, Any]:
     if payload.source is not None:
         normalized = payload.source.strip().lower().replace(" ", "_")

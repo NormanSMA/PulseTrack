@@ -144,6 +144,17 @@ function isFileLike(value: unknown): value is { text: () => Promise<string>; siz
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const rawContentLength = request.headers.get("content-length");
+  if (rawContentLength !== null) {
+    const declaredBytes = Number(rawContentLength);
+    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_CSV_BYTES) {
+      return NextResponse.json(
+        { ok: false, error: "El contenido CSV excede el limite de 10 MB." },
+        { status: 413 },
+      );
+    }
+  }
+
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   let csvText = "";
 

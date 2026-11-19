@@ -23,6 +23,13 @@ BEGIN
     (v_user_a, DATE '2026-11-18', 'garmin', 620, 1780, 462, 68.50, 51, 88, 82, 24, 18.40, 1012.50, 27.20, 64.00),
     (v_user_b, DATE '2026-11-18', 'garmin', 510, 1720, 430, 61.00, 54, 81, 75, 29, 19.10, 1011.80, 27.20, 64.00);
 
+  INSERT INTO body_composition (
+    user_id, measured_at, source, weight_kg, body_fat_pct, muscle_mass_kg,
+    water_pct, visceral_fat, bmr_kcal, synced_to_garmin
+  ) VALUES
+    (v_user_a, TIMESTAMPTZ '2026-11-18T06:35:00Z', 'renpho', 76.40, 14.80, 61.70, 60.40, 6, 1795, true),
+    (v_user_b, TIMESTAMPTZ '2026-11-18T06:40:00Z', 'renpho', 82.10, 18.20, 63.00, 58.10, 8, 1840, true);
+
   -- 1. Rechazo ADR-001: apple_health prohibido en daily_biometrics
   BEGIN
     INSERT INTO daily_biometrics (user_id, date, source, active_kcal, resting_kcal, sleep_minutes)
@@ -124,6 +131,24 @@ BEGIN
     RAISE EXCEPTION 'FALLO: RLS permitio actualizar % filas de otro usuario', v_rows;
   END IF;
   RAISE NOTICE 'OK [6/7]: 0 filas afectadas al intentar UPDATE sobre otro user_id';
+
+  -- 6b. Bloqueo ADR-001 en body_composition para authenticated (solo SELECT propio)
+  SELECT COUNT(*) INTO v_rows FROM body_composition;
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION 'FALLO: SELECT en body_composition para user_a debio ver 1 fila, obtuvo %', v_rows;
+  END IF;
+
+  BEGIN
+    INSERT INTO body_composition (
+      user_id, measured_at, source, weight_kg
+    ) VALUES (
+      v_user_a, TIMESTAMPTZ '2026-11-19T06:35:00Z', 'renpho', 76.00
+    );
+    RAISE EXCEPTION 'FALLO: authenticated pudo insertar en body_composition';
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      RAISE NOTICE 'OK [6b/7]: INSERT en body_composition bloqueado para authenticated (ADR-001)';
+  END;
 
   EXECUTE 'RESET ROLE';
 

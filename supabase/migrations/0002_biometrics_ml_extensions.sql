@@ -60,6 +60,23 @@ ALTER TABLE body_composition
     AND (bmr_kcal IS NULL OR bmr_kcal > 0)
   );
 
+-- RLS en body_composition: lectura authenticated, escritura exclusiva service_role (RENPHO -> Garmin, ADR-001)
+DROP POLICY IF EXISTS p_body_composition_owner ON body_composition;
+DROP POLICY IF EXISTS p_body_composition_select_authenticated ON body_composition;
+DROP POLICY IF EXISTS p_body_composition_write_service_role ON body_composition;
+
+REVOKE INSERT, UPDATE, DELETE ON body_composition FROM authenticated, anon;
+GRANT SELECT ON body_composition TO authenticated;
+
+CREATE POLICY p_body_composition_select_authenticated ON body_composition
+  FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY p_body_composition_write_service_role ON body_composition
+  FOR ALL TO service_role
+  USING (true)
+  WITH CHECK (true);
+
 -- 3. gpx_routes: metadatos de ruta y desacople aerobico Pa:Hr
 ALTER TABLE gpx_routes
   ADD COLUMN IF NOT EXISTS title TEXT,
