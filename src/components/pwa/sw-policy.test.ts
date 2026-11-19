@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { classifySwRequest, SW_PRECACHE_ROUTES } from "./sw-policy";
 
@@ -74,5 +76,14 @@ describe("sw-policy PWA offline", () => {
         mode: "cors",
       }),
     ).toBe("bypass");
+  });
+
+  it("valida invariantes directas del archivo desplegado public/sw.js", () => {
+    const swSource = readFileSync(path.join(process.cwd(), "public", "sw.js"), "utf8");
+    expect(swSource).toContain('CACHE_PREFIX = "pulsetrack-shell-"');
+    expect(swSource).toContain('url.pathname.startsWith("/api/")');
+    expect(swSource).toContain("event.waitUntil(");
+    expect(swSource).toContain("response.status >= 500");
+    expect(swSource).toContain("key.startsWith(CACHE_PREFIX)");
   });
 });

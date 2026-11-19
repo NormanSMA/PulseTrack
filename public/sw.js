@@ -1,4 +1,5 @@
-const CACHE_VERSION = "pulsetrack-shell-v1";
+const CACHE_PREFIX = "pulsetrack-shell-";
+const CACHE_VERSION = `${CACHE_PREFIX}v1`;
 const PRECACHE_ROUTES = [
   "/",
   "/gym",
@@ -23,7 +24,9 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_VERSION)
-      .then((cache) => cache.addAll(PRECACHE_ROUTES).catch(() => undefined))
+      .then((cache) =>
+        Promise.allSettled(PRECACHE_ROUTES.map((route) => cache.add(route))),
+      )
       .then(() => self.skipWaiting()),
   );
 });
@@ -35,7 +38,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== CACHE_VERSION)
+            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_VERSION)
             .map((key) => caches.delete(key)),
         ),
       )
@@ -58,7 +61,9 @@ self.addEventListener("fetch", (event) => {
         return fetch(request).then((response) => {
           if (response.ok) {
             const copy = response.clone();
-            void caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+            event.waitUntil(
+              caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)),
+            );
           }
           return response;
         });
@@ -73,7 +78,16 @@ self.addEventListener("fetch", (event) => {
         .then((response) => {
           if (response.ok) {
             const copy = response.clone();
-            void caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+            event.waitUntil(
+              caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)),
+            );
+            return response;
+          }
+          if (response.status >= 500) {
+            return caches
+              .match(request)
+              .then((cached) => cached ?? caches.match("/"))
+              .then((fallback) => fallback ?? response);
           }
           return response;
         })
