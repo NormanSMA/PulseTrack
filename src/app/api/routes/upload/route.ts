@@ -177,7 +177,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   let source: RouteSource = "gpx_upload";
   if (fields.source !== undefined && fields.source !== null) {
-    const normalized = typeof fields.source === "string" ? fields.source.trim().toLowerCase() : "";
+    if (typeof fields.source !== "string") {
+      return fail("source debe ser gpx_upload o garmin.", 400);
+    }
+    const normalized = fields.source.trim().toLowerCase();
     if (normalized === "garmin" || normalized === "gpx_upload") {
       source = normalized;
     } else if (normalized.length > 0) {

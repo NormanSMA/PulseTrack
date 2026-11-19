@@ -111,6 +111,13 @@ function computeBounds(
   return [minLon, minLat, maxLon, maxLat];
 }
 
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function applyStyleMode(map: maplibregl.Map, styleId: MapStyleId): void {
   const active = BASE_LAYER_BY_STYLE[styleId];
   for (const layerId of Object.values(BASE_LAYER_BY_STYLE)) {
@@ -126,7 +133,7 @@ function applyStyleMode(map: maplibregl.Map, styleId: MapStyleId): void {
   map.easeTo({
     pitch: is3d ? 55 : 0,
     bearing: is3d ? -15 : 0,
-    duration: 600,
+    duration: prefersReducedMotion() ? 0 : 600,
   });
 }
 
@@ -246,8 +253,18 @@ export function GpxMapViewer({ segments, styleId, routeKey }: GpxMapViewerProps)
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
 
+    let disposed = false;
+    const disposeMap = () => {
+      if (disposed) return;
+      disposed = true;
+      readyRef.current = false;
+      mapRef.current = null;
+      map.remove();
+    };
+
     map.on("error", () => {
       if (!map.loaded() && !readyRef.current && !map.isStyleLoaded()) {
+        disposeMap();
         setUseFallback(true);
       }
     });
@@ -282,9 +299,7 @@ export function GpxMapViewer({ segments, styleId, routeKey }: GpxMapViewerProps)
     });
 
     return () => {
-      readyRef.current = false;
-      mapRef.current = null;
-      map.remove();
+      disposeMap();
     };
   }, []);
 
@@ -307,7 +322,7 @@ export function GpxMapViewer({ segments, styleId, routeKey }: GpxMapViewerProps)
           [bounds[0], bounds[1]],
           [bounds[2], bounds[3]],
         ],
-        { padding: 48, duration: 600 },
+        { padding: 48, duration: prefersReducedMotion() ? 0 : 600 },
       );
     }
   }, [routeKey]);

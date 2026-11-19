@@ -744,8 +744,8 @@ function routeMetadata(header: string) {
   const metadata = /<((?:[\w.-]+:)?metadata)(?:\s[^>]*)?>([\s\S]*?)<\/\1\s*>/.exec(header)?.[2] ?? "";
   const nameTag = /<((?:[\w.-]+:)?name)\s*>([^<]*)<\/\1\s*>/;
   const typeTag = /<((?:[\w.-]+:)?type)\s*>([^<]*)<\/\1\s*>/;
-  const title = decodeXmlText(nameTag.exec(track)?.[2] ?? nameTag.exec(metadata)?.[2] ?? "");
-  const activityType = decodeXmlText(typeTag.exec(track || header)?.[2] ?? "");
+  const title = decodeXmlText(nameTag.exec(track)?.[2] ?? nameTag.exec(metadata)?.[2] ?? "").slice(0, 120);
+  const activityType = decodeXmlText(typeTag.exec(track || header)?.[2] ?? "").slice(0, 40);
   return { title: title || "Ruta GPX", activityType: activityType || "running" };
 }
 

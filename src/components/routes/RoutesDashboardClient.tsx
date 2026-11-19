@@ -168,11 +168,32 @@ function pulseColorHex(hr: number | null): string {
   return "#60A5FA";
 }
 
-function buildSegments(points: RoutePoint[], mode: ColorMode): SegmentCollection {
+function buildSegments(
+  points: RoutePoint[],
+  mode: ColorMode,
+  maxVertices = 1000,
+): SegmentCollection {
   const features: SegmentFeature[] = [];
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1];
-    const b = points[i];
+  if (points.length < 2) {
+    return { type: "FeatureCollection", features };
+  }
+  const targetVertices = Math.max(2, maxVertices);
+  const stride =
+    points.length > targetVertices
+      ? Math.ceil((points.length - 1) / (targetVertices - 1))
+      : 1;
+  const sampled: RoutePoint[] = [];
+  for (let i = 0; i < points.length; i += stride) {
+    const point = points[i];
+    if (point) sampled.push(point);
+  }
+  const last = points[points.length - 1];
+  if (last && sampled[sampled.length - 1] !== last) {
+    sampled.push(last);
+  }
+  for (let i = 1; i < sampled.length; i += 1) {
+    const a = sampled[i - 1];
+    const b = sampled[i];
     if (!a || !b) continue;
     features.push({
       type: "Feature",
@@ -281,8 +302,11 @@ export function RoutesDashboardClient() {
   const [uploadFailed, setUploadFailed] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const requestSeqRef = useRef(0);
 
   const loadRoutes = useCallback(async (id?: string) => {
+    const seq = requestSeqRef.current + 1;
+    requestSeqRef.current = seq;
     setLoading(true);
     setLoadError(null);
     try {
@@ -291,16 +315,20 @@ export function RoutesDashboardClient() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json: unknown = await res.json();
       if (!isRoutesResponse(json)) throw new Error("Respuesta invalida");
+      if (seq !== requestSeqRef.current) return;
       setRoutes(json.routes);
       setRoute(json.route);
     } catch (error) {
+      if (seq !== requestSeqRef.current) return;
       const detail = error instanceof Error ? error.message : "Error desconocido";
       setLoadError(`No se pudo cargar las rutas (${detail}). Se muestra una ruta demo.`);
       const fallback = buildFallbackRoute();
       setRoutes([fallback]);
       setRoute(fallback);
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -366,7 +394,13 @@ export function RoutesDashboardClient() {
 
   const segments = useMemo<SegmentCollection | null>(() => {
     if (!route) return null;
-    if (colorMode === "pulse") return buildSegments(route.points, "pulse");
+    if (colorMode === "pulse") {
+      return buildSegments(
+        route.points,
+        "pulse",
+        Math.max(60, route.simplifiedCount),
+      );
+    }
     return route.segmentsGeoJson;
   }, [route, colorMode]);
 

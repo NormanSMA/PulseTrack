@@ -121,6 +121,16 @@ describe("Integracion /api/routes + gpx-engine real", () => {
     const oversized = "x".repeat(10 * 1024 * 1024 + 512);
     const res413 = await POST(jsonUpload({ gpx: `${SAMPLE_GPX}<!--${oversized}-->` }));
     expect(res413.status).toBe(413);
+
+    const resNonStringSource = await POST(jsonUpload({ gpx: SAMPLE_GPX, source: 123 }));
+    expect(resNonStringSource.status).toBe(400);
+
+    const longNameGpx = SAMPLE_GPX.replace("Intervalos Laguna", "N".repeat(200)).replace("running", "T".repeat(80));
+    const resTrunc = await POST(jsonUpload({ gpx: longNameGpx }, "", { "x-user-id": "int-trunc" }));
+    expect(resTrunc.status).toBe(201);
+    const bodyTrunc = (await resTrunc.json()) as UploadBody;
+    expect(bodyTrunc.route.title).toHaveLength(120);
+    expect(bodyTrunc.route.activityType).toHaveLength(40);
   });
 
   it("comprime >98% sobre 50 000 pts con invariantes deterministas en ADR-003", () => {
