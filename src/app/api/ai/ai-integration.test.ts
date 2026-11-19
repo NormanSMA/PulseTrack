@@ -80,6 +80,7 @@ describe("Integracion real /api/ai/route + /api/scriptable + cloud-router", () =
     expect(scriptableRes.status).toBe(200);
     expect(scriptableRes.headers.get("cache-control")).toContain("max-age=900");
     expect(scriptableRes.headers.get("x-pulsetrack-cache-ttl")).toBe("900");
+    expect(scriptableRes.headers.get("vary")).toBe("x-user-id");
     const scriptableBody = (await scriptableRes.json()) as ScriptableGetBody;
     expect(scriptableBody.ok).toBe(true);
     expect(scriptableBody.payload.theme).toBe("amoled-pure-black");
@@ -90,6 +91,7 @@ describe("Integracion real /api/ai/route + /api/scriptable + cloud-router", () =
     expect(scriptableBody.payload.metrics.fallbackActive).toBe(true);
     expect(scriptableBody.payload.scriptableCode).toContain("ListWidget");
     expect(scriptableBody.payload.scriptableCode).toContain("#000000");
+    expect(scriptableBody.payload.scriptableCode).toContain('"payload" in raw');
   });
 
   it("conmuta hasta openrouter/free cuando caen workers_ai, nim y gemini y bloquea apple_health con 403", async () => {
@@ -101,6 +103,7 @@ describe("Integracion real /api/ai/route + /api/scriptable + cloud-router", () =
           taskKind: "biometric_reasoning",
           prompt: "Evalua riesgo de sobreentrenamiento con ACWR 1.42 y VFC en descenso.",
           simulateFailureProviders: ["nim", "workers_ai", "gemini"],
+          timeoutMs: 3000,
         }),
       }),
     );
@@ -110,6 +113,19 @@ describe("Integracion real /api/ai/route + /api/scriptable + cloud-router", () =
     expect(deepBody.result.modelName).toBe("openrouter/free");
     expect(deepBody.result.fallbackUsed).toBe(true);
     expect(deepBody.result.attempts).toHaveLength(4);
+
+    const badTimeoutRes = await postAiRoute(
+      new Request("http://localhost/api/ai/route", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          taskKind: "tactical_summary",
+          prompt: "Test",
+          timeoutMs: 10,
+        }),
+      }),
+    );
+    expect(badTimeoutRes.status).toBe(400);
 
     const appleGet = await getAiRoute(new Request("http://localhost/api/ai/route?source=apple_health"));
     expect(appleGet.status).toBe(403);

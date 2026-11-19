@@ -66,10 +66,14 @@ export async function GET(request: Request): Promise<NextResponse> {
       logs: listTelemetryLogs(actor),
       providers: getProviderQuotaStatuses(actor),
       activeModels: {
-        workers_ai: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        workers_ai:
+          process.env.WORKERS_AI_FAST_MODEL?.trim() ||
+          "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         nim: resolveNimModel(),
-        gemini: "gemini-2.5-flash-lite",
-        openrouter: "openrouter/free",
+        gemini:
+          process.env.GEMINI_FAST_MODEL?.trim() || "gemini-2.5-flash-lite",
+        openrouter:
+          process.env.OPENROUTER_FALLBACK_MODEL?.trim() || "openrouter/free",
         onnx_local: "pulsetrack-readiness-mlp-v1.onnx",
       },
     },
@@ -119,8 +123,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const { taskKind, prompt, simulateFailureProviders, nimModelOverride } =
-    rawBody;
+  const {
+    taskKind,
+    prompt,
+    simulateFailureProviders,
+    nimModelOverride,
+    timeoutMs,
+  } = rawBody;
 
   if (!isTaskKind(taskKind)) {
     return NextResponse.json(
@@ -151,13 +160,14 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (simulateFailureProviders !== undefined) {
     if (
       !Array.isArray(simulateFailureProviders) ||
+      simulateFailureProviders.length > 10 ||
       !simulateFailureProviders.every(isCloudProviderId)
     ) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            "simulateFailureProviders debe ser un arreglo de proveedores cloud validos.",
+            "simulateFailureProviders debe ser un arreglo de hasta 10 proveedores cloud validos.",
         },
         { status: 400, headers: NO_STORE },
       );
@@ -184,6 +194,25 @@ export async function POST(request: Request): Promise<NextResponse> {
     validatedNimOverride = nimModelOverride.trim();
   }
 
+  let validatedTimeoutMs: number | undefined;
+  if (timeoutMs !== undefined) {
+    if (
+      typeof timeoutMs !== "number" ||
+      !Number.isFinite(timeoutMs) ||
+      timeoutMs < 50 ||
+      timeoutMs > 30000
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "timeoutMs debe ser un numero entre 50 y 30000.",
+        },
+        { status: 400, headers: NO_STORE },
+      );
+    }
+    validatedTimeoutMs = timeoutMs;
+  }
+
   const actor = resolveActorKey(request);
 
   try {
@@ -192,6 +221,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       prompt: prompt.trim(),
       simulateFailureProviders: validatedSimulateFailures,
       nimModelOverride: validatedNimOverride,
+      timeoutMs: validatedTimeoutMs,
     });
 
     appendTelemetryLog(actor, result.telemetry);

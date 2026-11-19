@@ -10,6 +10,7 @@ const NO_STORE = { "Cache-Control": "no-store" } as const;
 const SCRIPTABLE_CACHE_HEADERS = {
   "Cache-Control": "public, max-age=900, stale-while-revalidate=900",
   "X-PulseTrack-Cache-TTL": "900",
+  Vary: "x-user-id",
 } as const;
 
 export async function GET(request: Request): Promise<NextResponse> {

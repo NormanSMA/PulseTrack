@@ -58,7 +58,7 @@ const TASK_OPTIONS: {
   {
     id: "multimodal_vision",
     label: "Vision Multimodal",
-    primaryHint: "Google AI Studio (Gemini 2.5 Flash-Lite) -> NVIDIA NIM -> OpenRouter :free",
+    primaryHint: "Google AI Studio (Gemini 2.5 Flash-Lite) -> OpenRouter :free -> Workers AI",
     defaultPrompt:
       "Analiza captura nutricional pre-entreno: avena 80g, whey 35g, platano 120g y estima impacto glucemico.",
   },
@@ -312,7 +312,7 @@ export function buildFallbackTelemetry(): {
 export function buildFallbackScriptable(): ScriptableWidgetPayload {
   const scriptableCode = [
     "// PulseTrack iOS Scriptable Widget (AMOLED #000000 - Cache 15 min)",
-    'const API_URL = "https://pulsetrack.app/api/scriptable";',
+    'const API_URL = "https://pulsetrack.nsma.dev/api/scriptable";',
     "const fm = FileManager.local();",
     'const cachePath = fm.joinPath(fm.documentsDirectory(), "pulsetrack-widget-cache.json");',
     "let data = null;",
@@ -410,7 +410,7 @@ function buildLocalSimulatedRouteResult(
       },
       {
         provider: "workers_ai",
-        modelName: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        modelName: "@cf/qwen/qwen2.5-coder-32b-instruct",
         baseLatencyMs: 295,
       },
       {
@@ -431,19 +431,14 @@ function buildLocalSimulatedRouteResult(
         baseLatencyMs: 412,
       },
       {
-        provider: "nim",
-        modelName: "nvidia/nemotron-3-ultra-550b-a55b",
-        baseLatencyMs: 630,
+        provider: "openrouter",
+        modelName: "openrouter/free",
+        baseLatencyMs: 910,
       },
       {
         provider: "workers_ai",
         modelName: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         baseLatencyMs: 310,
-      },
-      {
-        provider: "openrouter",
-        modelName: "openrouter/free",
-        baseLatencyMs: 910,
       },
     ],
   };
@@ -657,6 +652,7 @@ export function AiEngineDashboardClient() {
       return;
     }
 
+    requestSeqRef.current += 1;
     setRouting(true);
     setRouteStatusMessage("Enrutando solicitud en cascada Cloud...");
 
@@ -672,6 +668,14 @@ export function AiEngineDashboardClient() {
       });
 
       const json: unknown = await response.json().catch(() => null);
+      if (response.status >= 400 && response.status < 500) {
+        const msg =
+          isRecord(json) && typeof json.error === "string"
+            ? json.error
+            : `Error de validacion HTTP ${response.status}`;
+        setRouteStatusMessage(msg);
+        return;
+      }
       if (!response.ok || !isRoutePostApiResponse(json)) {
         const msg =
           isRecord(json) && typeof json.error === "string"

@@ -252,7 +252,8 @@ if (!payload || Date.now() >= refreshAt) {
   try {
     const request = new Request(endpointUrl);
     request.timeoutInterval = 5;
-    const response = await request.loadJSON();
+    const raw = await request.loadJSON();
+    const response = raw && typeof raw === "object" && "payload" in raw && raw.payload ? raw.payload : raw;
     const statusCode = request.response?.statusCode;
     if (!(statusCode >= 200 && statusCode < 300) || !response?.metrics || typeof response.shapSummary !== "string") {
       throw new Error("Respuesta Scriptable inválida.");
