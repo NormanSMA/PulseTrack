@@ -1,0 +1,72 @@
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+.maplibregl-map {
+  background-color: #000000;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.maplibregl-canvas {
+  outline: none;
+}
+
+.maplibregl-ctrl-group {
+  background-color: #0a0a0a;
+  border: 1px solid #262626;
+  border-radius: 0.75rem;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.maplibregl-ctrl-group:not(:empty) {
+  box-shadow: none;
+}
+
+.maplibregl-ctrl-group button {
+  width: 44px;
+  height: 44px;
+  background-color: #0a0a0a;
+  border-color: #262626;
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid #262626;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background-color: #262626;
+}
+
+.maplibregl-ctrl-group button:focus-visible {
+  outline: 2px solid rgb(var(--accent-strain));
+  outline-offset: -2px;
+}
+
+.maplibregl-ctrl-group button:active {
+  background-color: #000000;
+}
+
+.maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+.maplibregl-ctrl-attrib {
+  background-color: rgb(0 0 0 / 0.7);
+  color: rgb(var(--fg-secondary));
+}
+
+.maplibregl-ctrl-attrib a {
+  color: rgb(var(--fg-secondary));
+}
+
+.maplibregl-ctrl-scale {
+  background-color: rgb(0 0 0 / 0.7);
+  border-color: rgb(var(--fg-secondary));
+  color: rgb(var(--fg-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .maplibregl-map * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
