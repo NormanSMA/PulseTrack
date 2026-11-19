@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DEFAULT_WHAT_IF_SLIDERS,
+  ONNX_MODEL_METADATA,
+  simulateWhatIf,
+  type WhatIfSliders,
+} from "@/lib/ai/onnx-readiness";
 import type {
   AiAttemptRecord,
   AiCloudProviderId,
@@ -652,7 +658,8 @@ export function AiEngineDashboardClient() {
       return;
     }
 
-    requestSeqRef.current += 1;
+    const seq = requestSeqRef.current + 1;
+    requestSeqRef.current = seq;
     setRouting(true);
     setRouteStatusMessage("Enrutando solicitud en cascada Cloud...");
 
@@ -668,6 +675,7 @@ export function AiEngineDashboardClient() {
       });
 
       const json: unknown = await response.json().catch(() => null);
+      if (seq !== requestSeqRef.current) return;
       if (response.status >= 400 && response.status < 500) {
         const msg =
           isRecord(json) && typeof json.error === "string"
@@ -698,6 +706,7 @@ export function AiEngineDashboardClient() {
         `Respuesta completada por ${json.result.provider} (${json.result.latencyMs} ms).`,
       );
     } catch {
+      if (seq !== requestSeqRef.current) return;
       const simulated = buildLocalSimulatedRouteResult(
         selectedTask,
         trimmedPrompt,
@@ -709,7 +718,9 @@ export function AiEngineDashboardClient() {
         `Simulacion determinista local ejecutada via ${simulated.provider} (${simulated.latencyMs} ms).`,
       );
     } finally {
-      setRouting(false);
+      if (seq === requestSeqRef.current) {
+        setRouting(false);
+      }
     }
   };
 
@@ -772,6 +783,8 @@ export function AiEngineDashboardClient() {
           Studio, OpenRouter :free e inferencia local ONNX.
         </p>
       </header>
+
+      <WhatIfSimulator />
 
       {loadError ? (
         <div
@@ -1258,5 +1271,156 @@ export function AiEngineDashboardClient() {
         </div>
       </section>
     </div>
+  );
+}
+
+const WHAT_IF_CONTROLS = [
+  { key: "sleepHours", label: "Duración del sueño", unit: "h", min: 0, max: 14, step: 0.25 },
+  { key: "sleepTempC", label: "Temperatura nocturna", unit: "°C", min: 10, max: 40, step: 0.1 },
+  { key: "hrvRmssdMs", label: "VFC (RMSSD)", unit: "ms", min: 10, max: 200, step: 1 },
+  { key: "plannedGymTonnageKg", label: "Tonelaje de fuerza previsto", unit: "kg", min: 0, max: 30000, step: 100 },
+  { key: "plannedTrailKm", label: "Distancia de senderismo prevista", unit: "km", min: 0, max: 100, step: 0.5 },
+  { key: "hydrationLiters", label: "Hidratación", unit: "L", min: 0, max: 10, step: 0.1 },
+] as const satisfies readonly {
+  key: keyof WhatIfSliders;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+}[];
+
+function WhatIfSimulator() {
+  const [sliders, setSliders] = useState<WhatIfSliders>(DEFAULT_WHAT_IF_SLIDERS);
+  const [showLatency, setShowLatency] = useState(false);
+  const { readinessScore, readinessLabel, strainScore, acwr, inferenceLatencyMs, anomaly, shap } =
+    useMemo(() => simulateWhatIf(sliders), [sliders]);
+  const contributions = useMemo(
+    () => [...shap.contributions].sort((a, b) => Math.abs(b.deltaPoints) - Math.abs(a.deltaPoints)),
+    [shap.contributions],
+  );
+
+  useEffect(() => {
+    setShowLatency(true);
+  }, []);
+
+  return (
+    <section
+      aria-labelledby="what-if-title"
+      className="space-y-5 rounded-2xl border border-border-subtle bg-surface p-4 tabular-nums sm:p-6"
+    >
+      <header className="space-y-2">
+        <h2 id="what-if-title" className="text-xl font-semibold text-ink-primary">
+          Fábrica neuronal ONNX · Simulador What-If
+        </h2>
+        <p className="text-sm text-ink-secondary">Inferencia local · Objetivo de 144 Hz y latencia inferior a 2 ms</p>
+      </header>
+
+      <dl className="grid gap-3 border-y border-border-subtle py-3 text-xs sm:grid-cols-2 xl:grid-cols-4">
+        <div>
+          <dt className="text-ink-secondary">Archivo</dt>
+          <dd className="break-all font-mono text-ink-primary">{ONNX_MODEL_METADATA.fileName}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-secondary">Versión</dt>
+          <dd className="break-all font-mono text-ink-primary">{ONNX_MODEL_METADATA.version}</dd>
+        </div>
+        <div>
+          <dt className="text-ink-secondary">Preentrenamiento</dt>
+          <dd className="font-semibold text-ink-primary">{ONNX_MODEL_METADATA.syntheticPretrainDays} días sintéticos</dd>
+        </div>
+        <div>
+          <dt className="text-ink-secondary">Tamaño del modelo</dt>
+          <dd className="font-semibold text-ink-primary">{ONNX_MODEL_METADATA.sizeBytes / 1024} KB / límite &lt; 500 KB</dd>
+        </div>
+      </dl>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <fieldset className="min-w-0 rounded-xl border border-border-subtle bg-void px-3 pb-3 sm:px-4">
+          <legend className="px-1 text-sm font-semibold text-ink-primary">Variables del escenario</legend>
+          <div className="divide-y divide-border-subtle">
+            {WHAT_IF_CONTROLS.map(({ key, label, unit, min, max, step }) => (
+              <div key={key} className="pt-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
+                  <label htmlFor={`what-if-${key}`} className="text-ink-primary">{label}</label>
+                  <span aria-hidden="true" className="font-mono text-accent-strain">{sliders[key]} {unit}</span>
+                </div>
+                <input
+                  id={`what-if-${key}`}
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={sliders[key]}
+                  aria-valuetext={`${sliders[key]} ${unit}`}
+                  onChange={(event) => {
+                    const value = event.currentTarget.valueAsNumber;
+                    setSliders((previous) => ({ ...previous, [key]: value }));
+                  }}
+                  className="block min-h-11 min-w-11 w-full cursor-pointer rounded-md accent-accent-strain pt-motion-gpu motion-reduce:transform-none hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-strain active:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSliders(DEFAULT_WHAT_IF_SLIDERS)}
+            className={`mt-2 ${BUTTON_BASE} ${BUTTON_IDLE}`}
+          >
+            Restablecer escenario
+          </button>
+        </fieldset>
+
+        <div className="min-w-0 space-y-4">
+          <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border-subtle bg-elevated p-4">
+            <div className="col-span-2 border-b border-border-subtle pb-3">
+              <dt className="text-sm text-ink-secondary">Readiness · {readinessLabel}</dt>
+              <dd className="text-4xl font-semibold tracking-tight text-accent-recovery">
+                {readinessScore.toFixed(2)} <span className="text-sm text-ink-secondary">/ 100</span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-secondary">Strain</dt>
+              <dd className="text-lg font-semibold text-accent-strain">{strainScore.toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-secondary">ACWR</dt>
+              <dd className="text-lg font-semibold text-ink-primary">{acwr.toFixed(2)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-secondary">Latencia de inferencia</dt>
+              <dd className="text-lg font-semibold text-ink-primary">
+                {showLatency ? `${inferenceLatencyMs.toFixed(3)} ms` : "Midiendo…"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-secondary">Autoencoder · MSE / umbral p95</dt>
+              <dd className={`text-lg font-semibold ${anomaly.isAnomaly ? "text-accent-alert" : "text-ink-primary"}`}>
+                {anomaly.anomalyMse.toFixed(4)} / {anomaly.p95Threshold.toFixed(3)}
+              </dd>
+            </div>
+          </dl>
+          {anomaly.isAnomaly && (
+            <p role="alert" className="rounded-xl border border-border-strong bg-void p-3 text-sm text-accent-alert">
+              Alerta preventiva. {anomaly.liveIslandAlert}
+            </p>
+          )}
+          <div className="rounded-xl border border-border-subtle bg-void p-4">
+            <h3 className="text-sm font-semibold text-ink-primary">Desglose aditivo SHAP</h3>
+            <p className="mt-2 text-sm text-ink-secondary">{shap.naturalLanguageSummary}</p>
+            <dl className="mt-3 divide-y divide-border-subtle text-sm">
+              {contributions.map(({ feature, label, value, deltaPoints }) => (
+                <div key={feature} className="flex items-baseline justify-between gap-2 py-1.5">
+                  <dt className="text-ink-secondary">{label} <span className="text-ink-primary">({value})</span></dt>
+                  <dd className={`shrink-0 font-mono ${deltaPoints < 0 ? "text-accent-danger" : "text-ink-primary"}`}>
+                    {deltaPoints >= 0 ? "+" : ""}{deltaPoints.toFixed(3)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
