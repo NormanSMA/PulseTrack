@@ -105,10 +105,14 @@ function extractSummaryAndSessions(parsed: unknown): {
     readCountField(rawSummary?.sessionsCount) ?? sessions.length;
   const exercisesCount =
     readCountField(rawSummary?.exercisesCount) ??
+    readCountField(parsed.exercisesCount) ??
     catalogCount ??
     exerciseKeys.size;
   const setsCount =
-    readCountField(rawSummary?.setsCount) ?? topSetsCount ?? computedSets;
+    readCountField(rawSummary?.setsCount) ??
+    readCountField(parsed.setsCount) ??
+    topSetsCount ??
+    computedSets;
   const duplicatesSkipped =
     readCountField(rawSummary?.duplicatesSkipped) ??
     readCountField(parsed.duplicatesSkipped) ??
@@ -224,7 +228,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
-    const { parseHevyCsv } = await import("../../../../lib/ingest/hevy-csv");
+    const { parseHevyCsv } = await import("@/lib/ingest/hevy-csv");
     const parsed: unknown = await Promise.resolve(parseHevyCsv(csvText));
     const { summary, sessions } = extractSummaryAndSessions(parsed);
     return NextResponse.json(

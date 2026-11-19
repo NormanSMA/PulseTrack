@@ -136,7 +136,9 @@ function mergeBiometricsFromUnknown(
     recoveryScore: readNumber(raw, "recoveryScore", "recovery_score") ?? fallback.recoveryScore,
     recoveryDelta: readString(raw, "recoveryDelta", "recovery_delta") ?? fallback.recoveryDelta,
     hrvMs: readNumber(raw, "hrvMs", "hrv_ms") ?? fallback.hrvMs,
-    restingHrBpm: readNumber(raw, "restingHrBpm", "resting_hr_bpm") ?? fallback.restingHrBpm,
+    restingHrBpm:
+      readNumber(raw, "restingHrBpm", "resting_hr_bpm", "restingHr", "resting_hr") ??
+      fallback.restingHrBpm,
     strainScore: readNumber(raw, "strainScore", "strain_score") ?? fallback.strainScore,
     acwr: readNumber(raw, "acwr") ?? fallback.acwr,
     sleepMinutes: readNumber(raw, "sleepMinutes", "sleep_minutes") ?? fallback.sleepMinutes,
@@ -176,7 +178,10 @@ function mergeBodyCompositionFromUnknown(
     return fallback;
   }
   return {
-    date: readString(raw, "date", "record_date") ?? fallback?.date ?? nowIso.slice(0, 10),
+    date:
+      readString(raw, "date", "record_date", "measuredAt", "measured_at")?.slice(0, 10) ??
+      fallback?.date ??
+      nowIso.slice(0, 10),
     weightKg,
     bodyFatPct: readNumber(raw, "bodyFatPct", "body_fat_pct") ?? fallback?.bodyFatPct ?? null,
     muscleMassKg:
@@ -226,8 +231,15 @@ function parseWeatherFromUnknown(
       readString(candidate, "conditionLabel", "condition_label", "condition") ??
       fallback?.conditionLabel ??
       "Despejado",
-    source: readString(candidate, "source") ?? fallback?.source ?? "open-meteo",
-    fetchedAt: readString(candidate, "fetchedAt", "fetched_at") ?? nowIso,
+    source:
+      readString(candidate, "source") ??
+      readString(raw, "source") ??
+      fallback?.source ??
+      "open-meteo",
+    fetchedAt:
+      readString(candidate, "fetchedAt", "fetched_at") ??
+      readString(raw, "fetchedAt", "fetched_at") ??
+      nowIso,
   };
 }
 
@@ -244,7 +256,9 @@ function parseHevySessionsFromUnknown(
     if (!isRecord(item)) {
       continue;
     }
-    const id = readString(item, "id", "sessionId", "session_id") ?? `hevy-${nowIso}-${i}`;
+    const id =
+      readString(item, "id", "externalId", "sessionId", "session_id") ??
+      `hevy-${nowIso}-${i}`;
     const title = readString(item, "title", "workoutTitle", "name") ?? "Hevy Workout";
     const date =
       readString(item, "date", "startedAt", "startTime", "sessionDate")?.slice(0, 10) ??
