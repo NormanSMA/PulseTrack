@@ -26,18 +26,28 @@ model OAuthVault {
 
 // 2. daily_biometrics (Autoridad unica: Garmin)
 model DailyBiometric {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  date         DateTime @db.Date
-  source       String   @default("garmin")
-  activeKcal   Int      @default(0) @map("active_kcal")
-  restingKcal  Int      @default(0) @map("resting_kcal")
-  sleepMinutes Int      @default(0) @map("sleep_minutes")
-  hrvMs        Decimal? @map("hrv_ms") @db.Decimal(6, 2)
-  restingHr    Int?     @map("resting_hr")
-  rawPayload   Json     @default("{}") @map("raw_payload") @db.JsonB
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  date               DateTime @db.Date
+  source             String   @default("garmin")
+  activeKcal         Int      @default(0) @map("active_kcal")
+  restingKcal        Int      @default(0) @map("resting_kcal")
+  sleepMinutes       Int      @default(0) @map("sleep_minutes")
+  hrvMs              Decimal? @map("hrv_ms") @db.Decimal(6, 2)
+  restingHr          Int?     @map("resting_hr")
+  sleepScore         Int?     @map("sleep_score")
+  bodyBattery        Int?     @map("body_battery")
+  stressAvg          Int?     @map("stress_avg")
+  campTempC          Decimal? @map("camp_temp_c") @db.Decimal(5, 2)
+  campPressureHpa    Decimal? @map("camp_pressure_hpa") @db.Decimal(6, 2)
+  weatherTempC       Decimal? @map("weather_temp_c") @db.Decimal(5, 2)
+  weatherHumidityPct Decimal? @map("weather_humidity_pct") @db.Decimal(5, 2)
+  subjEnergy         Int?     @map("subj_energy") @db.SmallInt
+  subjSoreness       Int?     @map("subj_soreness") @db.SmallInt
+  subjMood           Int?     @map("subj_mood") @db.SmallInt
+  rawPayload         Json     @default("{}") @map("raw_payload") @db.JsonB
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   @@unique([userId, date], map: "uq_daily_biometrics_user_date")
   @@index([userId, date(sort: Desc)], map: "idx_daily_biometrics_user_date")
@@ -53,6 +63,9 @@ model BodyComposition {
   weightKg       Decimal  @map("weight_kg") @db.Decimal(5, 2)
   bodyFatPct     Decimal? @map("body_fat_pct") @db.Decimal(5, 2)
   muscleMassKg   Decimal? @map("muscle_mass_kg") @db.Decimal(5, 2)
+  waterPct       Decimal? @map("water_pct") @db.Decimal(5, 2)
+  visceralFat    Int?     @map("visceral_fat") @db.SmallInt
+  bmrKcal        Int?     @map("bmr_kcal")
   syncedToGarmin Boolean  @default(false) @map("synced_to_garmin")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
@@ -111,16 +124,19 @@ model StrengthSet {
 
 // 5. gpx_routes (LineStringZ + GIST + GAP)
 model GpxRoute {
-  id             String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String                                @map("user_id") @db.Uuid
-  externalId     String                                @map("external_id")
-  source         String
-  geom           Unsupported("geometry(LineStringZ, 4326)")
-  distanceM      Decimal                               @map("distance_m") @db.Decimal(10, 2)
-  elevationGainM Decimal                               @default(0) @map("elevation_gain_m") @db.Decimal(8, 2)
-  gapPaceSecKm   Decimal?                              @map("gap_pace_sec_km") @db.Decimal(7, 2)
-  startedAt      DateTime                              @map("started_at") @db.Timestamptz
-  createdAt      DateTime                              @default(now()) @map("created_at") @db.Timestamptz
+  id                String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String                                @map("user_id") @db.Uuid
+  externalId        String                                @map("external_id")
+  source            String
+  title             String?
+  activityType      String?                               @map("activity_type")
+  geom              Unsupported("geometry(LineStringZ, 4326)")
+  distanceM         Decimal                               @map("distance_m") @db.Decimal(10, 2)
+  elevationGainM    Decimal                               @default(0) @map("elevation_gain_m") @db.Decimal(8, 2)
+  gapPaceSecKm      Decimal?                              @map("gap_pace_sec_km") @db.Decimal(7, 2)
+  paHrDecouplingPct Decimal?                              @map("pa_hr_decoupling_pct") @db.Decimal(5, 2)
+  startedAt         DateTime                              @map("started_at") @db.Timestamptz
+  createdAt         DateTime                              @default(now()) @map("created_at") @db.Timestamptz
 
   @@unique([userId, externalId], map: "uq_gpx_routes_user_ext")
   @@index([geom], type: Gist, map: "idx_gpx_routes_geom_gist")
@@ -156,7 +172,9 @@ model AiPrediction {
   targetDate     DateTime @map("target_date") @db.Date
   modelVersion   String   @map("model_version")
   readinessScore Decimal  @map("readiness_score") @db.Decimal(5, 2)
+  strainScore    Decimal? @map("strain_score") @db.Decimal(5, 2)
   acwr           Decimal  @db.Decimal(5, 3)
+  anomalyMse     Decimal? @map("anomaly_mse") @db.Decimal(10, 6)
   shapBreakdown  Json     @default("{}") @map("shap_breakdown") @db.JsonB
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
@@ -167,16 +185,18 @@ model AiPrediction {
 
 // 8. ai_telemetry_logs
 model AiTelemetryLog {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  requestId String   @unique(map: "uq_ai_telemetry_logs_request") @map("request_id") @db.Uuid
-  provider  String
-  modelName String   @map("model_name")
-  latencyMs Int      @map("latency_ms")
-  tokensIn  Int      @default(0) @map("tokens_in")
-  tokensOut Int      @default(0) @map("tokens_out")
-  status    String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  requestId    String   @unique(map: "uq_ai_telemetry_logs_request") @map("request_id") @db.Uuid
+  provider     String
+  modelName    String   @map("model_name")
+  latencyMs    Int      @map("latency_ms")
+  tokensIn     Int      @default(0) @map("tokens_in")
+  tokensOut    Int      @default(0) @map("tokens_out")
+  fallbackUsed Boolean  @default(false) @map("fallback_used")
+  statusCode   Int      @default(200) @map("status_code")
+  status       String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([userId, createdAt(sort: Desc)], map: "idx_ai_telemetry_logs_user_created")
   @@map("ai_telemetry_logs")
