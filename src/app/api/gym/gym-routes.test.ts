@@ -3,7 +3,7 @@
 interface MockSet {
   weightKg: number;
   reps: number;
-  isWarmup: boolean;
+  setType?: string;
 }
 
 interface MockSession {
@@ -14,14 +14,15 @@ interface MockSession {
 interface MockRoutine {
   id: string;
   name: string;
-  exercises: Array<{ exerciseName: string; sets: number; targetReps: number; restSeconds: number }>;
+  exercises: Array<{ exerciseName: string; sets: number; targetReps: string; restSeconds: number }>;
 }
 
 vi.mock("@/lib/sports/strength-metrics", () => ({
   calculateEpley1RM: (weightKg: number, reps: number): number => weightKg * (1 + reps / 30),
   calculateSessionTonnage: (sets: readonly MockSet[], includeWarmup = false): number =>
     sets.reduce(
-      (total, set) => (set.isWarmup && !includeWarmup ? total : total + set.weightKg * set.reps),
+      (total, set) =>
+        set.setType === "warmup" && !includeWarmup ? total : total + set.weightKg * set.reps,
       0,
     ),
   calculateWeeklyTonnage: (sessions: readonly MockSession[]) => {

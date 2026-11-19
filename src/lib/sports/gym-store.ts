@@ -4,107 +4,35 @@ import {
   calculateSessionTonnage,
   calculateWeeklyTonnage,
 } from "@/lib/sports/strength-metrics";
-
-export interface GymSet {
-  exerciseExternalId: string;
-  exerciseName: string;
-  weightKg: number;
-  reps: number;
-  rpe: number | null;
-  isWarmup: boolean;
-}
-
-export interface GymSession {
-  externalId: string;
-  title: string;
-  date: string;
-  startedAt: string;
-  source: string;
-  totalVolumeKg: number;
-  sets: GymSet[];
-}
-
-export interface CatalogItem {
-  externalId: string;
-  name: string;
-  muscleGroup: string;
-  equipment: string;
-  defaultStepNote: string;
-  isCustom: boolean;
-}
-
-export interface RoutineExercise {
-  exerciseExternalId: string;
-  exerciseName: string;
-  sets: number;
-  targetReps: number;
-  targetRpe: number;
-  restSeconds: number;
-  notes: string;
-}
-
-export interface GymRoutine {
-  id: string;
-  name: string;
-  splitTag: "push" | "pull" | "legs";
-  exercises: RoutineExercise[];
-}
+import type {
+  AcwrResult,
+  BodyCompositionPoint,
+  LiftAiRecommendation,
+  RoutineTemplate,
+  StrengthExerciseCatalogItem,
+  StrengthSessionRecord,
+  StrengthSetInput,
+  WeeklyTonnagePoint,
+} from "@/lib/sports/types";
 
 export interface DailyLoad {
   date: string;
   load: number;
 }
 
-export interface WeeklyTonnage {
-  weekStart: string;
-  tonnageKg: number;
-  sessionsCount: number;
-}
-
-export interface AcwrResult {
-  acuteLoad: number;
-  chronicLoad: number;
-  ratio: number;
-  zone: "undertraining" | "optimal" | "caution" | "high_risk";
-  label: string;
-}
-
-export interface LiftRecommendation {
-  exerciseExternalId: string;
-  exerciseName: string;
-  currentTopKg: number;
-  currentE1rmKg: number;
-  suggestedKg: number;
-  deltaKg: number;
-  rationale: string;
-}
-
-export interface BodyCompositionPoint {
-  measuredAt: string;
-  date: string;
-  source: string;
-  weightKg: number;
-  bodyFatPct: number | null;
-  muscleMassKg: number | null;
-  waterPct: number | null;
-  visceralFat: number | null;
-  bmrKcal: number | null;
-  syncedToGarmin: true;
-}
-
 export interface GymSnapshot {
-  routines: GymRoutine[];
-  sessions: GymSession[];
-  weeklyTonnage: WeeklyTonnage[];
+  routines: RoutineTemplate[];
+  sessions: StrengthSessionRecord[];
+  weeklyTonnage: WeeklyTonnagePoint[];
   acwr: AcwrResult;
-  recommendations: LiftRecommendation[];
+  recommendations: LiftAiRecommendation[];
   recoveryScore: number;
 }
 
 interface ActorState {
-  catalog: Map<string, CatalogItem>;
-  routines: GymRoutine[];
-  sessions: Map<string, GymSession>;
+  catalog: Map<string, StrengthExerciseCatalogItem>;
+  routines: RoutineTemplate[];
+  sessions: Map<string, StrengthSessionRecord>;
   bodyComposition: Map<string, BodyCompositionPoint>;
 }
 
@@ -154,13 +82,13 @@ const EXERCISE_SEEDS: readonly ExerciseSeed[] = [
 const ROUTINE_SEEDS: ReadonlyArray<{
   id: string;
   name: string;
-  splitTag: GymRoutine["splitTag"];
+  splitTag: RoutineTemplate["splitTag"];
   lines: readonly RoutineSeedLine[];
 }> = [
   {
     id: "routine-push",
     name: "Push",
-    splitTag: "push",
+    splitTag: "Push",
     lines: [
       { name: "Bench Press", equipment: "barbell", sets: 4, targetReps: 6, targetRpe: 8, restSeconds: 150, baseKg: 80 },
       { name: "Overhead Press", equipment: "barbell", sets: 3, targetReps: 8, targetRpe: 8, restSeconds: 120, baseKg: 50 },
@@ -173,7 +101,7 @@ const ROUTINE_SEEDS: ReadonlyArray<{
   {
     id: "routine-pull",
     name: "Pull",
-    splitTag: "pull",
+    splitTag: "Pull",
     lines: [
       { name: "Barbell Row", equipment: "barbell", sets: 4, targetReps: 8, targetRpe: 8, restSeconds: 120, baseKg: 70 },
       { name: "Pull-Up", equipment: "bodyweight", sets: 3, targetReps: 8, targetRpe: 8, restSeconds: 120, baseKg: 10 },
@@ -185,7 +113,7 @@ const ROUTINE_SEEDS: ReadonlyArray<{
   {
     id: "routine-legs",
     name: "Legs",
-    splitTag: "legs",
+    splitTag: "Legs",
     lines: [
       { name: "Back Squat", equipment: "barbell", sets: 4, targetReps: 6, targetRpe: 8, restSeconds: 180, baseKg: 100 },
       { name: "Romanian Deadlift", equipment: "barbell", sets: 3, targetReps: 8, targetRpe: 8, restSeconds: 150, baseKg: 90 },
@@ -237,8 +165,8 @@ function startOfUtcDayMs(ms: number): number {
   return Math.floor(ms / DAY_MS) * DAY_MS;
 }
 
-function buildSeedCatalog(): Map<string, CatalogItem> {
-  const catalog = new Map<string, CatalogItem>();
+function buildSeedCatalog(): Map<string, StrengthExerciseCatalogItem> {
+  const catalog = new Map<string, StrengthExerciseCatalogItem>();
   for (const seed of EXERCISE_SEEDS) {
     const externalId = buildExerciseExternalId(seed.name, seed.equipment);
     catalog.set(externalId, { externalId, ...seed });
@@ -246,7 +174,7 @@ function buildSeedCatalog(): Map<string, CatalogItem> {
   return catalog;
 }
 
-function buildSeedRoutines(): GymRoutine[] {
+function buildSeedRoutines(): RoutineTemplate[] {
   return ROUTINE_SEEDS.map((routine) => ({
     id: routine.id,
     name: routine.name,
@@ -255,7 +183,7 @@ function buildSeedRoutines(): GymRoutine[] {
       exerciseExternalId: buildExerciseExternalId(line.name, line.equipment),
       exerciseName: line.name,
       sets: line.sets,
-      targetReps: line.targetReps,
+      targetReps: String(line.targetReps),
       targetRpe: line.targetRpe,
       restSeconds: line.restSeconds,
       notes: `${line.sets}x${line.targetReps} RPE ${line.targetRpe}`,
@@ -271,12 +199,12 @@ export function buildSessionExternalId(
   return `gym-${slugify(source)}-${startedAt}-${slugify(title)}`;
 }
 
-export function computeSessionVolume(sets: readonly GymSet[]): number {
+export function computeSessionVolume(sets: readonly StrengthSetInput[]): number {
   return roundTo(calculateSessionTonnage(sets), 2);
 }
 
-function buildSeedSessions(nowMs: number): Map<string, GymSession> {
-  const sessions = new Map<string, GymSession>();
+function buildSeedSessions(nowMs: number): Map<string, StrengthSessionRecord> {
+  const sessions = new Map<string, StrengthSessionRecord>();
   const todayMs = startOfUtcDayMs(nowMs);
   for (let index = 0; index < ACWR_WINDOW_DAYS; index += 1) {
     const slot = index % 4;
@@ -288,37 +216,41 @@ function buildSeedSessions(nowMs: number): Map<string, GymSession> {
     const date = toIsoDate(dayMs);
     const startedAt = `${date}T17:30:00.000Z`;
     const progression = 1 + 0.015 * Math.floor(index / 7);
-    const sets: GymSet[] = [];
+    const sets: StrengthSetInput[] = [];
     for (const line of routine.lines) {
       const exerciseExternalId = buildExerciseExternalId(line.name, line.equipment);
       const workingKg = roundToPlate(line.baseKg * progression);
       sets.push({
         exerciseExternalId,
         exerciseName: line.name,
+        setIndex: 0,
         weightKg: roundToPlate(workingKg * 0.5),
         reps: 8,
         rpe: null,
-        isWarmup: true,
+        setType: "warmup",
+        notes: null,
       });
       for (let setIndex = 0; setIndex < line.sets; setIndex += 1) {
         sets.push({
           exerciseExternalId,
           exerciseName: line.name,
+          setIndex: setIndex + 1,
           weightKg: workingKg,
           reps: Math.max(1, line.targetReps - (setIndex === line.sets - 1 ? 1 : 0)),
           rpe: Math.min(10, line.targetRpe + (setIndex === line.sets - 1 ? 1 : 0)),
-          isWarmup: false,
+          setType: "normal",
+          notes: null,
         });
       }
     }
     const title = routine.name;
-    const externalId = buildSessionExternalId("manual", startedAt, title);
+    const externalId = buildSessionExternalId("pulsetrack", startedAt, title);
     sessions.set(externalId, {
       externalId,
       title,
       date,
       startedAt,
-      source: "manual",
+      source: "pulsetrack",
       totalVolumeKg: computeSessionVolume(sets),
       sets,
     });
@@ -370,7 +302,7 @@ export function resetGymStore(): void {
   actorStates.clear();
 }
 
-export function listCatalog(actorKey: string): CatalogItem[] {
+export function listCatalog(actorKey: string): StrengthExerciseCatalogItem[] {
   return [...getActorState(actorKey).catalog.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
@@ -379,33 +311,33 @@ export function listCatalog(actorKey: string): CatalogItem[] {
 export function insertCustomExercise(
   actorKey: string,
   input: { name: string; muscleGroup: string; equipment: string; defaultStepNote: string },
-): { item: CatalogItem; deduplicated: boolean } {
+): { item: StrengthExerciseCatalogItem; deduplicated: boolean } {
   const state = getActorState(actorKey);
   const externalId = buildExerciseExternalId(input.name, input.equipment);
   const existing = state.catalog.get(externalId);
   if (existing) {
     return { item: existing, deduplicated: true };
   }
-  const item: CatalogItem = {
+  const item: StrengthExerciseCatalogItem = {
     externalId,
     name: input.name,
     muscleGroup: input.muscleGroup,
     equipment: input.equipment,
-    defaultStepNote: input.defaultStepNote,
+    defaultStepNote: input.defaultStepNote || null,
     isCustom: true,
   };
   state.catalog.set(externalId, item);
   return { item, deduplicated: false };
 }
 
-export function findRoutine(actorKey: string, routineId: string): GymRoutine | undefined {
+export function findRoutine(actorKey: string, routineId: string): RoutineTemplate | undefined {
   return getActorState(actorKey).routines.find((routine) => routine.id === routineId);
 }
 
 export function insertSession(
   actorKey: string,
-  session: GymSession,
-): { session: GymSession; deduplicated: boolean } {
+  session: StrengthSessionRecord,
+): { session: StrengthSessionRecord; deduplicated: boolean } {
   const state = getActorState(actorKey);
   const existing = state.sessions.get(session.externalId);
   if (existing) {
@@ -415,7 +347,7 @@ export function insertSession(
   return { session, deduplicated: false };
 }
 
-function buildDailyLoads(sessions: readonly GymSession[], nowMs: number): DailyLoad[] {
+function buildDailyLoads(sessions: readonly StrengthSessionRecord[], nowMs: number): DailyLoad[] {
   const todayMs = startOfUtcDayMs(nowMs);
   const loadByDate = new Map<string, number>();
   for (const session of sessions) {

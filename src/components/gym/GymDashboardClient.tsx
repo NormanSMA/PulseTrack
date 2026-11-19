@@ -607,7 +607,7 @@ function parseGymSessionsResponse(raw: unknown): GymSessionsData | null {
         startedAt: asString(s.startedAt),
         source: asString(s.source, "hevy"),
         totalVolumeKg: asNumber(s.totalVolumeKg, 0),
-        sets: Math.max(0, Math.round(asNumber(s.sets, 0))),
+        sets: Array.isArray(s.sets) ? s.sets.length : Math.max(0, Math.round(asNumber(s.sets, 0))),
       };
     })
     .filter((s): s is GymSessionSummary => s !== null);

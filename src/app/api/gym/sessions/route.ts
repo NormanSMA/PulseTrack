@@ -12,13 +12,17 @@ import {
   insertSession,
   resolveActorKey,
   slugify,
-  type GymSet,
-  type GymSession,
 } from "@/lib/sports/gym-store";
+import type { StrengthSessionRecord, StrengthSetInput } from "@/lib/sports/types";
 
 const MAX_SETS = 200;
 const MAX_TEXT_LENGTH = 120;
-const SOURCE_PATTERN = /^[a-z0-9_-]{1,32}$/;
+const ALLOWED_SET_TYPES: ReadonlySet<string> = new Set([
+  "normal",
+  "warmup",
+  "dropset",
+  "failure",
+]);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -36,7 +40,7 @@ function badRequest(error: string): NextResponse {
   return NextResponse.json({ ok: false, error }, { status: 400 });
 }
 
-function parseSet(value: unknown, index: number): GymSet | string {
+function parseSet(value: unknown, index: number): StrengthSetInput | string {
   if (!isPlainRecord(value)) {
     return `sets[${index}] debe ser un objeto.`;
   }
@@ -45,12 +49,12 @@ function parseSet(value: unknown, index: number): GymSet | string {
   if (exerciseName.length === 0 || exerciseName.length > MAX_TEXT_LENGTH) {
     return `sets[${index}].exerciseName debe ser texto no vacio.`;
   }
-  const { weightKg, reps, rpe, isWarmup } = value;
+  const { weightKg, reps, rpe, isWarmup, setType, notes, setIndex } = value;
   if (typeof weightKg !== "number" || !Number.isFinite(weightKg) || weightKg < 0) {
     return `sets[${index}].weightKg debe ser un numero finito mayor o igual a 0.`;
   }
-  if (typeof reps !== "number" || !Number.isFinite(reps) || reps <= 0) {
-    return `sets[${index}].reps debe ser un numero finito mayor que 0.`;
+  if (typeof reps !== "number" || !Number.isFinite(reps) || !Number.isInteger(reps) || reps <= 0) {
+    return `sets[${index}].reps debe ser un entero positivo.`;
   }
   let parsedRpe: number | null = null;
   if (rpe !== undefined && rpe !== null) {
@@ -62,6 +66,19 @@ function parseSet(value: unknown, index: number): GymSet | string {
   if (isWarmup !== undefined && typeof isWarmup !== "boolean") {
     return `sets[${index}].isWarmup debe ser booleano.`;
   }
+  let normalizedSetType: StrengthSetInput["setType"] = isWarmup === true ? "warmup" : "normal";
+  if (setType !== undefined) {
+    if (typeof setType !== "string" || !ALLOWED_SET_TYPES.has(setType)) {
+      return `sets[${index}].setType invalido.`;
+    }
+    normalizedSetType = setType as StrengthSetInput["setType"];
+  }
+  const parsedSetIndex =
+    typeof setIndex === "number" && Number.isInteger(setIndex) && setIndex >= 0
+      ? setIndex
+      : index;
+  const parsedNotes = typeof notes === "string" && notes.trim().length > 0 ? notes.trim() : null;
+
   let exerciseExternalId = buildExerciseExternalId(exerciseName, "other");
   if (value.exerciseExternalId !== undefined) {
     if (
@@ -76,10 +93,12 @@ function parseSet(value: unknown, index: number): GymSet | string {
   return {
     exerciseExternalId,
     exerciseName,
+    setIndex: parsedSetIndex,
     weightKg,
     reps,
     rpe: parsedRpe,
-    isWarmup: isWarmup === true,
+    setType: normalizedSetType,
+    notes: parsedNotes,
   };
 }
 
@@ -114,7 +133,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return badRequest("title debe ser texto no vacio.");
   }
 
-  let source = "manual";
+  let source: "hevy" | "pulsetrack" = "pulsetrack";
   if (body.source !== undefined) {
     if (typeof body.source !== "string") {
       return badRequest("source debe ser texto.");
@@ -125,10 +144,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 403 },
       );
     }
-    source = body.source.trim().toLowerCase();
-    if (!SOURCE_PATTERN.test(source)) {
-      return badRequest("source debe usar solo letras, numeros, guion y guion bajo.");
+    const normalizedSource = body.source.trim().toLowerCase();
+    if (normalizedSource !== "hevy" && normalizedSource !== "pulsetrack") {
+      return badRequest("source debe ser hevy o pulsetrack.");
     }
+    source = normalizedSource;
   }
 
   let startedAt: string;
@@ -158,7 +178,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!Array.isArray(body.sets) || body.sets.length === 0 || body.sets.length > MAX_SETS) {
     return badRequest("sets debe ser una lista con entre 1 y 200 series.");
   }
-  const sets: GymSet[] = [];
+  const sets: StrengthSetInput[] = [];
   for (const [index, rawSet] of body.sets.entries()) {
     const parsed = parseSet(rawSet, index);
     if (typeof parsed === "string") {
@@ -167,7 +187,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     sets.push(parsed);
   }
 
-  const session: GymSession = {
+  const session: StrengthSessionRecord = {
     externalId: buildSessionExternalId(source, startedAt, title),
     title,
     date,

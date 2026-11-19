@@ -9,8 +9,8 @@ import {
   insertBodyComposition,
   listBodyComposition,
   resolveActorKey,
-  type BodyCompositionPoint,
 } from "@/lib/sports/gym-store";
+import type { BodyCompositionPoint } from "@/lib/sports/types";
 
 const ALLOWED_SOURCES: ReadonlySet<string> = new Set(["renpho", "garmin"]);
 
@@ -91,7 +91,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     return forbidden("ADR-001: X-Service-Token invalido para escribir body_composition.");
   }
 
-  let source = "renpho";
+  let source: "renpho" | "garmin" = "renpho";
   if (body.source !== undefined) {
     if (typeof body.source !== "string") {
       return NextResponse.json({ ok: false, error: "source debe ser texto." }, { status: 400 });
@@ -99,13 +99,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (isAppleHealthSource(body.source)) {
       return forbidden("ADR-001: apple_health esta estrictamente prohibido en PulseTrack.");
     }
-    source = body.source.trim().toLowerCase();
-    if (!ALLOWED_SOURCES.has(source)) {
+    const normalized = body.source.trim().toLowerCase();
+    if (!ALLOWED_SOURCES.has(normalized)) {
       return NextResponse.json(
         { ok: false, error: "source debe ser renpho o garmin." },
         { status: 400 },
       );
     }
+    source = normalized as "renpho" | "garmin";
   }
 
   const { weightKg } = body;
