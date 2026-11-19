@@ -33,9 +33,12 @@ const MAP_STYLE: StyleSpecification = {
   sources: {
     mono: {
       type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png"],
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}",
+      ],
       tileSize: 256,
-      attribution: "OpenStreetMap, CARTO",
+      maxzoom: 16,
+      attribution: "Esri World Hillshade Dark",
     },
     topo: {
       type: "raster",
@@ -56,7 +59,15 @@ const MAP_STYLE: StyleSpecification = {
   },
   layers: [
     { id: "bg", type: "background", paint: { "background-color": "#000000" } },
-    { id: "base-mono", type: "raster", source: "mono" },
+    {
+      id: "base-mono",
+      type: "raster",
+      source: "mono",
+      paint: {
+        "raster-brightness-max": 0.65,
+        "raster-contrast": 0.2,
+      },
+    },
     {
       id: "base-topo",
       type: "raster",

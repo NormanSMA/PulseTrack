@@ -9,7 +9,7 @@ import {
 import type { RouteColorMode as GeoColorMode } from "@/lib/geo/types";
 import { isAppleHealthSource } from "@/lib/ingest/swr-policy";
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TITLE_LENGTH = 120;
 const MAX_ACTIVITY_LENGTH = 40;
 const NO_STORE = { "Cache-Control": "no-store" } as const;
@@ -40,7 +40,7 @@ function fail(error: string, status: number): NextResponse {
 }
 
 function tooLarge(): NextResponse {
-  return fail("El archivo GPX excede el limite de 10 MB.", 413);
+  return fail("El archivo GPX excede el limite de 25 MB.", 413);
 }
 
 function appleHealthForbidden(): NextResponse {

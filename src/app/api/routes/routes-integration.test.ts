@@ -98,7 +98,7 @@ describe("Integracion /api/routes + gpx-engine real", () => {
     expect(bodyGet.routes.some((item) => item.externalId === bodyPulse.route.externalId)).toBe(true);
   });
 
-  it("deduplica uploads repetidos y aplica guardas 403 apple_health y 413 >10 MB", async () => {
+  it("deduplica uploads repetidos y aplica guardas 403 apple_health y 413 >25 MB", async () => {
     const first = await POST(jsonUpload({ gpx: SAMPLE_GPX }));
     expect(first.status).toBe(201);
     const second = await POST(jsonUpload({ gpx: SAMPLE_GPX }));
@@ -118,7 +118,7 @@ describe("Integracion /api/routes + gpx-engine real", () => {
     );
     expect(resForm403.status).toBe(403);
 
-    const oversized = "x".repeat(10 * 1024 * 1024 + 512);
+    const oversized = "x".repeat(25 * 1024 * 1024 + 512);
     const res413 = await POST(jsonUpload({ gpx: `${SAMPLE_GPX}<!--${oversized}-->` }));
     expect(res413.status).toBe(413);
 

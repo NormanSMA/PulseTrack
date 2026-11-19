@@ -347,12 +347,12 @@ describe("POST /api/routes/upload", () => {
     expect(response.status).toBe(201);
   });
 
-  it("rechaza con 413 un Content-Length mayor a 10 MB", async () => {
+  it("rechaza con 413 un Content-Length mayor a 25 MB", async () => {
     const request = new Request(`${BASE}/api/routes/upload`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "content-length": String(10 * 1024 * 1024 + 1),
+        "content-length": String(25 * 1024 * 1024 + 1),
       },
       body: JSON.stringify({ gpx: GPX_A }),
     });
@@ -360,8 +360,8 @@ describe("POST /api/routes/upload", () => {
     expect(response.status).toBe(413);
   });
 
-  it("rechaza con 413 un cuerpo real mayor a 10 MB", async () => {
-    const padding = "x".repeat(10 * 1024 * 1024 + 1024);
+  it("rechaza con 413 un cuerpo real mayor a 25 MB", async () => {
+    const padding = "x".repeat(25 * 1024 * 1024 + 1024);
     const response = await POST(jsonPost({ gpx: `${GPX_A}<!--${padding}-->` }));
     expect(response.status).toBe(413);
   });
