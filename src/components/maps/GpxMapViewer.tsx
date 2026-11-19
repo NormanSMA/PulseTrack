@@ -226,6 +226,10 @@ export function GpxMapViewer({ segments, styleId, routeKey }: GpxMapViewerProps)
       return;
     }
 
+    if (!maplibregl.getWorkerUrl()) {
+      maplibregl.setWorkerUrl("/workers/maplibre-gl-worker.js");
+    }
+
     let map: maplibregl.Map;
     try {
       map = new maplibregl.Map({
