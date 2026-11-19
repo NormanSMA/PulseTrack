@@ -296,7 +296,7 @@ describe("Scriptable iOS", () => {
     const payload = buildScriptableWidgetPayload({ readinessScore: 73 });
     let saved: string | undefined;
     let now = 10_000;
-    const addText = vi.fn((_value: string) => ({}));
+    const addText = vi.fn<(value: string) => Record<string, never>>(() => ({}));
     const loadJSON = vi.fn().mockResolvedValueOnce(payload).mockRejectedValueOnce(new Error("Sin conexión"));
     const writeString = vi.fn((_path: string, value: string) => { saved = value; });
     const runtime = {
