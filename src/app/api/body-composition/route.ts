@@ -13,6 +13,7 @@ import {
 import type { BodyCompositionPoint } from "@/lib/sports/types";
 
 const ALLOWED_SOURCES: ReadonlySet<string> = new Set(["renpho", "garmin"]);
+const MAX_BODY_BYTES = 64 * 1024;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -29,12 +30,14 @@ function safeEqual(received: string, expected: string): boolean {
 function readOptionalMetric(
   value: unknown,
   field: string,
+  max: number,
+  min = 0,
 ): { value: number | null } | { error: string } {
   if (value === undefined || value === null) {
     return { value: null };
   }
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return { error: `${field} debe ser un numero finito mayor o igual a 0.` };
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+    return { error: `${field} debe ser un numero finito entre ${min} y ${max}.` };
   }
   return { value };
 }
@@ -50,9 +53,36 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const rawContentLength = request.headers.get("content-length");
+  if (rawContentLength !== null) {
+    const declaredBytes = Number(rawContentLength);
+    if (Number.isFinite(declaredBytes) && declaredBytes > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { ok: false, error: "El payload supera el limite de 64 KB." },
+        { status: 413 },
+      );
+    }
+  }
+
+  let rawBodyText = "";
+  try {
+    rawBodyText = await request.text();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "No se pudo leer el cuerpo en /api/body-composition." },
+      { status: 400 },
+    );
+  }
+  if (Buffer.byteLength(rawBodyText, "utf8") > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { ok: false, error: "El payload supera el limite de 64 KB." },
+      { status: 413 },
+    );
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBodyText);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Cuerpo JSON invalido en /api/body-composition." },
@@ -110,9 +140,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const { weightKg } = body;
-  if (typeof weightKg !== "number" || !Number.isFinite(weightKg) || weightKg <= 0) {
+  if (typeof weightKg !== "number" || !Number.isFinite(weightKg) || weightKg <= 0 || weightKg > 500) {
     return NextResponse.json(
-      { ok: false, error: "weightKg debe ser un numero finito mayor que 0." },
+      { ok: false, error: "weightKg debe ser un numero finito mayor que 0 y hasta 500 kg." },
       { status: 400 },
     );
   }
@@ -128,11 +158,11 @@ export async function POST(request: Request): Promise<NextResponse> {
     measuredAt = new Date(body.measuredAt).toISOString();
   }
 
-  const bodyFat = readOptionalMetric(body.bodyFatPct, "bodyFatPct");
-  const muscle = readOptionalMetric(body.muscleMassKg, "muscleMassKg");
-  const water = readOptionalMetric(body.waterPct, "waterPct");
-  const visceral = readOptionalMetric(body.visceralFat, "visceralFat");
-  const bmr = readOptionalMetric(body.bmrKcal, "bmrKcal");
+  const bodyFat = readOptionalMetric(body.bodyFatPct, "bodyFatPct", 100);
+  const muscle = readOptionalMetric(body.muscleMassKg, "muscleMassKg", 300);
+  const water = readOptionalMetric(body.waterPct, "waterPct", 100);
+  const visceral = readOptionalMetric(body.visceralFat, "visceralFat", 60);
+  const bmr = readOptionalMetric(body.bmrKcal, "bmrKcal", 10000, 1);
   if ("error" in bodyFat) {
     return NextResponse.json({ ok: false, error: bodyFat.error }, { status: 400 });
   }

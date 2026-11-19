@@ -17,6 +17,8 @@ import type { StrengthSessionRecord, StrengthSetInput } from "@/lib/sports/types
 
 const MAX_SETS = 200;
 const MAX_TEXT_LENGTH = 120;
+const MAX_WEIGHT_KG = 1500;
+const MAX_REPS = 1000;
 const ALLOWED_SET_TYPES: ReadonlySet<string> = new Set([
   "normal",
   "warmup",
@@ -50,11 +52,22 @@ function parseSet(value: unknown, index: number): StrengthSetInput | string {
     return `sets[${index}].exerciseName debe ser texto no vacio.`;
   }
   const { weightKg, reps, rpe, isWarmup, setType, notes, setIndex } = value;
-  if (typeof weightKg !== "number" || !Number.isFinite(weightKg) || weightKg < 0) {
-    return `sets[${index}].weightKg debe ser un numero finito mayor o igual a 0.`;
+  if (
+    typeof weightKg !== "number" ||
+    !Number.isFinite(weightKg) ||
+    weightKg < 0 ||
+    weightKg > MAX_WEIGHT_KG
+  ) {
+    return `sets[${index}].weightKg debe estar entre 0 y ${MAX_WEIGHT_KG} kg.`;
   }
-  if (typeof reps !== "number" || !Number.isFinite(reps) || !Number.isInteger(reps) || reps <= 0) {
-    return `sets[${index}].reps debe ser un entero positivo.`;
+  if (
+    typeof reps !== "number" ||
+    !Number.isFinite(reps) ||
+    !Number.isInteger(reps) ||
+    reps <= 0 ||
+    reps > MAX_REPS
+  ) {
+    return `sets[${index}].reps debe ser un entero entre 1 y ${MAX_REPS}.`;
   }
   let parsedRpe: number | null = null;
   if (rpe !== undefined && rpe !== null) {
@@ -157,8 +170,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (typeof body.startedAt !== "string" || Number.isNaN(Date.parse(body.startedAt))) {
       return badRequest("startedAt debe ser una fecha ISO valida.");
     }
-    startedAt = new Date(body.startedAt).toISOString();
-    date = startedAt.slice(0, 10);
+    const trimmedStart = body.startedAt.trim();
+    startedAt = new Date(trimmedStart).toISOString();
+    const prefixDay = trimmedStart.slice(0, 10);
+    date = isValidIsoDate(prefixDay) ? prefixDay : startedAt.slice(0, 10);
   } else if (body.date !== undefined) {
     if (typeof body.date !== "string" || !isValidIsoDate(body.date)) {
       return badRequest("date debe tener formato YYYY-MM-DD valido.");

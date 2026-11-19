@@ -249,6 +249,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const parsed: unknown = await Promise.resolve(parseHevyCsv(csvText));
     const { summary, sessions } = extractSummaryAndSessions(parsed);
     const actorKey = resolveActorKey(request);
+    let persistedInserted = 0;
+    let persistedDeduplicated = 0;
 
     for (const rawSession of sessions) {
       if (!isPlainRecord(rawSession)) continue;
@@ -305,7 +307,7 @@ export async function POST(request: Request): Promise<NextResponse> {
           ? rawSession.totalVolumeKg
           : 0;
 
-      insertSession(actorKey, {
+      const { deduplicated } = insertSession(actorKey, {
         externalId,
         title,
         date: isoStartedAt.slice(0, 10),
@@ -314,6 +316,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         totalVolumeKg,
         sets: mappedSets,
       });
+      if (deduplicated) {
+        persistedDeduplicated += 1;
+      } else {
+        persistedInserted += 1;
+      }
     }
 
     return NextResponse.json(
@@ -321,6 +328,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         ok: true,
         summary,
         sessions,
+        persistence: {
+          inserted: persistedInserted,
+          deduplicated: persistedDeduplicated,
+        },
       },
       { status: 200 },
     );

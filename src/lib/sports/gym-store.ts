@@ -55,6 +55,12 @@ interface RoutineSeedLine {
 }
 
 const DEFAULT_ACTOR_KEY = "local-owner";
+const ACTOR_KEY_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const MAX_ACTORS = 200;
+const MAX_SESSIONS_PER_ACTOR = 500;
+const MAX_CATALOG_PER_ACTOR = 500;
+const MAX_BODY_POINTS_PER_ACTOR = 365;
+const MAX_SESSIONS_RESPONSE = 90;
 const ACWR_WINDOW_DAYS = 28;
 const BODY_SERIES_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -128,8 +134,9 @@ const ROUTINE_SEEDS: ReadonlyArray<{
 const actorStates = new Map<string, ActorState>();
 
 export function resolveActorKey(request: Request): string {
+  // Almacenamiento temporal aislado por cabecera hasta enlazar Supabase Auth/RLS en despliegue.
   const headerUser = request.headers.get("x-user-id")?.trim();
-  if (headerUser && headerUser.length > 0 && headerUser.length <= 64) {
+  if (headerUser && ACTOR_KEY_PATTERN.test(headerUser)) {
     return headerUser;
   }
   return DEFAULT_ACTOR_KEY;
@@ -285,7 +292,15 @@ function buildSeedBodyComposition(nowMs: number): Map<string, BodyCompositionPoi
 export function getActorState(actorKey: string): ActorState {
   const existing = actorStates.get(actorKey);
   if (existing) {
+    actorStates.delete(actorKey);
+    actorStates.set(actorKey, existing);
     return existing;
+  }
+  if (actorStates.size >= MAX_ACTORS) {
+    const oldestActor = actorStates.keys().next().value;
+    if (typeof oldestActor === "string") {
+      actorStates.delete(oldestActor);
+    }
   }
   const nowMs = Date.now();
   const state: ActorState = {
@@ -296,6 +311,14 @@ export function getActorState(actorKey: string): ActorState {
   };
   actorStates.set(actorKey, state);
   return state;
+}
+
+function evictOldestIfOver<V>(map: Map<string, V>, limit: number): void {
+  while (map.size >= limit) {
+    const oldestKey = map.keys().next().value;
+    if (typeof oldestKey !== "string") break;
+    map.delete(oldestKey);
+  }
 }
 
 export function resetGymStore(): void {
@@ -326,6 +349,7 @@ export function insertCustomExercise(
     defaultStepNote: input.defaultStepNote || null,
     isCustom: true,
   };
+  evictOldestIfOver(state.catalog, MAX_CATALOG_PER_ACTOR);
   state.catalog.set(externalId, item);
   return { item, deduplicated: false };
 }
@@ -343,6 +367,7 @@ export function insertSession(
   if (existing) {
     return { session: existing, deduplicated: true };
   }
+  evictOldestIfOver(state.sessions, MAX_SESSIONS_PER_ACTOR);
   state.sessions.set(session.externalId, session);
   return { session, deduplicated: false };
 }
@@ -375,7 +400,7 @@ export function buildGymSnapshot(actorKey: string, nowMs: number = Date.now()): 
   const recoveryScore = computeRecoveryScore(acwr);
   return {
     routines: state.routines,
-    sessions: [...sessionsAsc].reverse(),
+    sessions: [...sessionsAsc].reverse().slice(0, MAX_SESSIONS_RESPONSE),
     weeklyTonnage: calculateWeeklyTonnage(sessionsAsc),
     acwr,
     recommendations: buildLiftAiRecommendations(sessionsAsc, acwr, recoveryScore),
@@ -399,6 +424,7 @@ export function insertBodyComposition(
   if (existing) {
     return { point: existing, deduplicated: true };
   }
+  evictOldestIfOver(state.bodyComposition, MAX_BODY_POINTS_PER_ACTOR);
   state.bodyComposition.set(key, point);
   return { point, deduplicated: false };
 }

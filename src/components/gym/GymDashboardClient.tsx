@@ -773,19 +773,16 @@ export function GymDashboardClient() {
     return parseBodyCompositionResponse(json);
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let active = true;
-
-    async function hydrate() {
+  const hydrateFromApi = useCallback(
+    async (signal?: AbortSignal) => {
       setDataSourceState("loading");
       try {
         const [sessionsResult, bodyResult] = await Promise.allSettled([
-          loadGymSessions(controller.signal),
-          loadBodyComposition(controller.signal),
+          loadGymSessions(signal),
+          loadBodyComposition(signal),
         ]);
 
-        if (!active) return;
+        if (signal?.aborted) return;
 
         let loadedAny = false;
 
@@ -809,18 +806,21 @@ export function GymDashboardClient() {
 
         setDataSourceState(loadedAny ? "live" : "fallback");
       } catch {
-        if (!active) return;
+        if (signal?.aborted) return;
         setDataSourceState("fallback");
       }
-    }
+    },
+    [loadBodyComposition, loadGymSessions],
+  );
 
-    void hydrate();
+  useEffect(() => {
+    const controller = new AbortController();
+    void hydrateFromApi(controller.signal);
 
     return () => {
-      active = false;
       controller.abort();
     };
-  }, [loadBodyComposition, loadGymSessions]);
+  }, [hydrateFromApi]);
 
   const activeMetricMeta = useMemo(
     () =>
@@ -1071,6 +1071,24 @@ export function GymDashboardClient() {
           Iniciar descanso 01:30
         </button>
       </header>
+
+      {dataSourceState === "fallback" ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent-alert/50 bg-accent-alert/10 px-4 py-3 text-xs text-accent-alert"
+        >
+          <span>
+            No se pudo sincronizar con la API de fuerza/RENPHO. Se muestran datos de respaldo local sin sincronizar.
+          </span>
+          <button
+            type="button"
+            onClick={() => void hydrateFromApi()}
+            className="min-h-11 rounded-full border border-accent-alert/60 bg-surface px-4 text-xs font-semibold uppercase tracking-wider text-accent-alert pt-motion-gpu hover:bg-elevated active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : null}
 
       <section aria-label="Indicadores de fuerza y composicion">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

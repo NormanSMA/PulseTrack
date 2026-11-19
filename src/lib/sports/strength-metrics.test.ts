@@ -7,7 +7,13 @@ import {
   calculateSessionTonnage,
   calculateWeeklyTonnage,
 } from "./strength-metrics";
-import type { AcwrResult, RoutineTemplate, StrengthSessionRecord, StrengthSetInput } from "./types";
+import type {
+  AcwrResult,
+  RoutineExercisePlan,
+  RoutineTemplate,
+  StrengthSessionRecord,
+  StrengthSetInput,
+} from "./types";
 
 function strengthSet(overrides: Partial<StrengthSetInput> = {}): StrengthSetInput {
   return { exerciseExternalId: "bench", exerciseName: "Bench Press", setIndex: 0, weightKg: 100, reps: 5, rpe: 8, ...overrides };
@@ -229,5 +235,44 @@ describe("buildGarminStrengthWorkoutExport", () => {
     expect(first.exportId).toMatch(/^garmin-wo-[0-9a-f]{16}$/);
     expect(second.exportId).toBe(first.exportId);
     expect(changed.exportId).not.toBe(first.exportId);
+  });
+
+  it("elimina caracteres bidi de formato \\p{Cf} en garminStepNote", () => {
+    const custom: RoutineExercisePlan = {
+      exerciseExternalId: "custom-bidi",
+      exerciseName: "Remo\u202E Polea",
+      sets: 3,
+      targetReps: "10",
+      targetRpe: 8,
+      restSeconds: 60,
+      notes: "Control\u200B estricto",
+    };
+    const workout = buildGarminStrengthWorkoutExport({ ...routine, exercises: [custom] });
+    expect(workout.steps[0]?.garminStepNote).toBe("Remo Polea | RPE 8 | Control estricto");
+  });
+
+  it("filtra Lift AI a la ventana reciente de 28 dias", () => {
+    const acwr: AcwrResult = { acuteLoad: 1200, chronicLoad: 1200, ratio: 1, zone: "optimal", label: "Carga óptima" };
+    const oldSession: StrengthSessionRecord = {
+      externalId: "s-old",
+      title: "Push antiguo",
+      date: "2026-09-01",
+      startedAt: "2026-09-01T10:00:00Z",
+      source: "hevy",
+      totalVolumeKg: 2000,
+      sets: [{ exerciseExternalId: "bench", exerciseName: "Bench Press", setIndex: 0, weightKg: 140, reps: 5, rpe: 8 }],
+    };
+    const recentSession: StrengthSessionRecord = {
+      externalId: "s-new",
+      title: "Push actual",
+      date: "2026-11-18",
+      startedAt: "2026-11-18T10:00:00Z",
+      source: "hevy",
+      totalVolumeKg: 1200,
+      sets: [{ exerciseExternalId: "bench", exerciseName: "Bench Press", setIndex: 0, weightKg: 90, reps: 5, rpe: 8 }],
+    };
+    const recs = buildLiftAiRecommendations([oldSession, recentSession], acwr, 85);
+    expect(recs[0]?.currentTopKg).toBe(90);
+    expect(recs[0]?.suggestedKg).toBe(92.5);
   });
 });

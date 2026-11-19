@@ -139,7 +139,14 @@ export function buildLiftAiRecommendations(
   type LiftHistory = Omit<LiftAiRecommendation, "suggestedKg" | "deltaKg" | "rationale"> & { latestRpe: number | null };
   const lifts = new Map<string, LiftHistory>();
   const recentSessions = [...sessions].sort((a, b) => sessionStartTime(b) - sessionStartTime(a));
-  for (const session of recentSessions) {
+  const latestTimestamp = recentSessions[0] ? sessionStartTime(recentSessions[0]) : NaN;
+  const windowCutoffMs = Number.isFinite(latestTimestamp) ? latestTimestamp - 28 * DAY_MS : -Infinity;
+  const windowedSessions = recentSessions.filter((session) => {
+    const ts = sessionStartTime(session);
+    return !Number.isFinite(ts) || ts >= windowCutoffMs;
+  });
+
+  for (const session of windowedSessions) {
     const recentSets = [...session.sets].sort((a, b) => b.setIndex - a.setIndex);
     for (const set of recentSets) {
       if (!hasValidSetLoad(set) || !Number.isInteger(set.reps)) continue;
@@ -203,7 +210,7 @@ export function buildGarminStrengthWorkoutExport(
   routine: RoutineTemplate,
   generatedAt = new Date().toISOString(),
 ): GarminStrengthWorkoutExport {
-  const whitespaceOrControl = new RegExp("[\\s\\p{Cc}]+", "gu");
+  const whitespaceOrControl = new RegExp("[\\s\\p{Cc}\\p{Cf}]+", "gu");
   const steps = routine.exercises.map((exercise, index) => {
     const { exerciseName, sets, targetReps, targetRpe, restSeconds, notes } = exercise;
     const garminStepNote = [exerciseName, `RPE ${targetRpe}`, notes ?? ""]

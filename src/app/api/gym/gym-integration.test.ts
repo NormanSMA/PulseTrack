@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GET as getBodyComposition, POST as postBodyComposition } from "@/app/api/body-composition/route";
 import { POST as postCatalog } from "@/app/api/gym/catalog/route";
 import { POST as postExportGarmin } from "@/app/api/gym/export-garmin/route";
-import { GET as getGymSessions } from "@/app/api/gym/sessions/route";
+import { GET as getGymSessions, POST as postGymSession } from "@/app/api/gym/sessions/route";
 import { POST as postHevyCsv } from "@/app/api/ingest/hevy/route";
 import { resetGymStore } from "@/lib/sports/gym-store";
 
@@ -124,5 +124,75 @@ describe("Integracion real modulo Gym & RENPHO sin mocks", () => {
       }),
     );
     expect(clientAttempt.status).toBe(401);
+
+    const oversized = await postBodyComposition(
+      new Request("http://localhost/api/body-composition", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-service-token": "gym-secret-token" },
+        body: JSON.stringify({ weightKg: 76.2, filler: "x".repeat(70_000) }),
+      }),
+    );
+    expect(oversized.status).toBe(413);
+  });
+
+  it("aplica cotas humanas, conserva fecha calendario en startedAt y reporta persistence Hevy", async () => {
+    const emptySlug = await postCatalog(
+      new Request("http://localhost/api/gym/catalog", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "!!!", muscleGroup: "back", equipment: "---" }),
+      }),
+    );
+    expect(emptySlug.status).toBe(400);
+
+    const overflowWeight = await postGymSession(
+      new Request("http://localhost/api/gym/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Push",
+          sets: [{ exerciseName: "Bench Press", weightKg: 5000, reps: 5 }],
+        }),
+      }),
+    );
+    expect(overflowWeight.status).toBe(400);
+
+    const tzSession = await postGymSession(
+      new Request("http://localhost/api/gym/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Nocturno Local",
+          startedAt: "2026-11-18T22:30:00-06:00",
+          sets: [{ exerciseName: "Bench Press", weightKg: 80, reps: 5 }],
+        }),
+      }),
+    );
+    const tzData = (await tzSession.json()) as { session: { date: string } };
+    expect(tzSession.status).toBe(201);
+    expect(tzData.session.date).toBe("2026-11-18");
+
+    const hevyCsv = [
+      "title,start_time,exercise_title,set_index,weight_kg,reps",
+      'Push,"2026-11-18 19:00",Bench Press,0,80,5',
+    ].join("\n");
+    const hevyFirst = await postHevyCsv(
+      new Request("http://localhost/api/ingest/hevy", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "dedup-user" },
+        body: JSON.stringify({ csv: hevyCsv }),
+      }),
+    );
+    const hevySecond = await postHevyCsv(
+      new Request("http://localhost/api/ingest/hevy", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-user-id": "dedup-user" },
+        body: JSON.stringify({ csv: hevyCsv }),
+      }),
+    );
+    const firstBody = (await hevyFirst.json()) as { persistence: { inserted: number; deduplicated: number } };
+    const secondBody = (await hevySecond.json()) as { persistence: { inserted: number; deduplicated: number } };
+    expect(firstBody.persistence).toEqual({ inserted: 1, deduplicated: 0 });
+    expect(secondBody.persistence).toEqual({ inserted: 0, deduplicated: 1 });
   });
 });

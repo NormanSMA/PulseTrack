@@ -3,7 +3,7 @@ import {
   BiometricAuthorityError,
   assertBiometricAuthority,
 } from "@/lib/ingest/swr-policy";
-import { insertCustomExercise, listCatalog, resolveActorKey } from "@/lib/sports/gym-store";
+import { insertCustomExercise, listCatalog, resolveActorKey, slugify } from "@/lib/sports/gym-store";
 
 const MAX_TEXT_LENGTH = 120;
 const MAX_NOTE_LENGTH = 280;
@@ -57,11 +57,17 @@ export async function POST(request: Request): Promise<NextResponse> {
   const name = readRequiredText(body.name);
   const muscleGroup = readRequiredText(body.muscleGroup);
   const equipment = readRequiredText(body.equipment);
-  if (name === null || muscleGroup === null || equipment === null) {
+  if (
+    name === null ||
+    muscleGroup === null ||
+    equipment === null ||
+    slugify(name).length === 0 ||
+    slugify(equipment).length === 0
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error: "name, muscleGroup y equipment deben ser textos no vacios (maximo 120 caracteres).",
+        error: "name, muscleGroup y equipment deben incluir caracteres alfanumericos validos (maximo 120).",
       },
       { status: 400 },
     );
