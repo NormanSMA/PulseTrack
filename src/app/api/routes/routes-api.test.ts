@@ -19,7 +19,34 @@ vi.mock("@/lib/geo/gpx-engine", () => {
     }
     return h.toString(16);
   };
-  const parseGpxTrack = (xml: string) => {
+  const buildColoredSegmentsGeoJson = (points: readonly MockPoint[], mode: string) => ({
+    type: "FeatureCollection",
+    features: points.slice(1).map((point, index) => {
+      const prev = points[index]!;
+      return {
+        type: "Feature",
+        properties: { colorHex: "#4ADE80", mode },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [prev.lon, prev.lat, prev.eleM],
+            [point.lon, point.lat, point.eleM],
+          ],
+        },
+      };
+    }),
+  });
+  const toPostgisLineStringZ = (points: readonly MockPoint[]): string =>
+    `LINESTRING Z(${points.map((p) => `${p.lon} ${p.lat} ${p.eleM}`).join(", ")})`;
+  const parseGpxTrack = (
+    xml: string,
+    options?: {
+      title?: string;
+      activityType?: string;
+      source?: string;
+      colorMode?: string;
+    },
+  ) => {
     const matches = Array.from(
       xml.matchAll(/<trkpt lat="(-?[\d.]+)" lon="(-?[\d.]+)">\s*<ele>(-?[\d.]+)<\/ele>/g),
     );
@@ -38,9 +65,9 @@ vi.mock("@/lib/geo/gpx-engine", () => {
     }));
     return {
       externalId: `gpx:${hash(xml)}`,
-      title: "Ruta parseada",
-      activityType: "running",
-      source: "gpx_upload",
+      title: options?.title ?? "Ruta parseada",
+      activityType: options?.activityType ?? "running",
+      source: options?.source ?? "gpx_upload",
       startedAt: "2026-11-15T12:00:00.000Z",
       distanceM: (points.length - 1) * 100,
       elevationGainM: 10,
@@ -55,23 +82,13 @@ vi.mock("@/lib/geo/gpx-engine", () => {
       pointsCount: points.length,
       simplifiedCount: points.length,
       points,
-      wktLineStringZ: `LINESTRING Z(${points.map((p) => `${p.lon} ${p.lat} ${p.eleM}`).join(", ")})`,
-      segmentsGeoJson: { type: "FeatureCollection", features: [] },
+      wktLineStringZ: toPostgisLineStringZ(points),
+      segmentsGeoJson: options?.colorMode
+        ? buildColoredSegmentsGeoJson(points, options.colorMode)
+        : { type: "FeatureCollection", features: [] },
       processingMs: 0.4,
     };
   };
-  const buildColoredSegmentsGeoJson = (_points: readonly MockPoint[], mode: string) => ({
-    type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        properties: { colorHex: "#FFFFFF", mode },
-        geometry: { type: "LineString", coordinates: [] },
-      },
-    ],
-  });
-  const toPostgisLineStringZ = (points: readonly MockPoint[]): string =>
-    `LINESTRING Z(${points.map((p) => `${p.lon} ${p.lat} ${p.eleM}`).join(", ")})`;
   return { parseGpxTrack, buildColoredSegmentsGeoJson, toPostgisLineStringZ };
 });
 
@@ -286,7 +303,7 @@ describe("POST /api/routes/upload", () => {
     expect(body.ok).toBe(true);
     expect(body.deduplicated).toBe(false);
     expect(body.route?.title).toBe("Mi ruta");
-    expect(body.route?.segmentsGeoJson.features[0]?.properties.mode).toBe("pulse");
+    expect(body.route?.segmentsGeoJson.features[0]?.properties.mode).toBe("hr");
     expect(body.postgisSqlPreview).toContain("INSERT INTO gpx_routes");
     expect(body.postgisSqlPreview).toContain("ST_GeomFromText($5, 4326)");
     expect(body.postgisSqlPreview).not.toContain("LINESTRING");

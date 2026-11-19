@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { buildColoredSegmentsGeoJson, parseGpxTrack } from "@/lib/geo/gpx-engine";
+import { parseGpxTrack } from "@/lib/geo/gpx-engine";
 import {
   insertRoute,
   resolveActorKey,
-  type RouteColorMode,
   type RouteSource,
   type StoredRoute,
 } from "@/lib/geo/routes-store";
+import type { RouteColorMode as GeoColorMode } from "@/lib/geo/types";
 import { isAppleHealthSource } from "@/lib/ingest/swr-policy";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -194,12 +194,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return fail(`activityType debe ser texto de maximo ${MAX_ACTIVITY_LENGTH} caracteres.`, 400);
   }
 
-  let colorMode: RouteColorMode | undefined;
+  let colorMode: GeoColorMode | undefined;
   if (fields.colorMode !== undefined && fields.colorMode !== null) {
-    if (fields.colorMode !== "grade" && fields.colorMode !== "pulse") {
-      return fail("colorMode debe ser grade o pulse.", 400);
+    if (fields.colorMode !== "grade" && fields.colorMode !== "hr" && fields.colorMode !== "pulse") {
+      return fail("colorMode debe ser grade, hr o pulse.", 400);
     }
-    colorMode = fields.colorMode;
+    colorMode = fields.colorMode === "pulse" ? "hr" : fields.colorMode;
   }
 
   if (typeof fields.gpx !== "string" || fields.gpx.trim().length === 0) {
@@ -211,17 +211,12 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   let route: StoredRoute;
   try {
-    const parsed = parseGpxTrack(fields.gpx);
-    route = {
-      ...parsed,
-      title: title ?? parsed.title,
-      activityType: activityType ?? parsed.activityType,
+    route = parseGpxTrack(fields.gpx, {
+      title,
+      activityType,
       source,
-      segmentsGeoJson:
-        colorMode !== undefined
-          ? buildColoredSegmentsGeoJson(parsed.points, colorMode)
-          : parsed.segmentsGeoJson,
-    };
+      colorMode,
+    });
   } catch (err: unknown) {
     const detail = err instanceof Error ? err.message : "formato desconocido";
     return fail(`GPX invalido: ${detail}`, 400);

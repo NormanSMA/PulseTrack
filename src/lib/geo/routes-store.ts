@@ -1,65 +1,28 @@
+import { buildColoredSegmentsGeoJson, toPostgisLineStringZ } from "./gpx-engine";
+import type {
+  GpxParsedRoute,
+  GpxSegmentFeature,
+  GpxTrackPoint,
+  RouteColorMode as GeoColorMode,
+} from "./types";
+
 export type RouteSource = "gpx_upload" | "garmin";
-export type RouteColorMode = "grade" | "pulse";
-
-export interface RoutePoint {
-  lon: number;
-  lat: number;
-  eleM: number;
-  timeMs: number;
-  hrBpm: number | null;
-  tempC: number | null;
-  cumDistM: number;
-  gradePct: number;
-}
-
-export interface SegmentFeature {
-  type: "Feature";
-  properties: Record<string, unknown>;
-  geometry: {
-    type: "LineString";
-    coordinates: ReadonlyArray<ReadonlyArray<number>>;
-  };
-}
-
-export interface SegmentsGeoJson {
-  type: "FeatureCollection";
-  features: ReadonlyArray<SegmentFeature>;
-}
-
-export interface StoredRoute {
-  externalId: string;
-  title: string;
-  activityType: string;
-  source: string;
-  startedAt: string;
-  distanceM: number;
-  elevationGainM: number;
-  elevationLossM: number;
-  durationSec: number;
-  rawPaceSecKm: number;
-  gapPaceSecKm: number;
-  paHrDecouplingPct: number | null;
-  thermalDriftBpm: number | null;
-  avgHrBpm: number | null;
-  avgTempC: number | null;
-  pointsCount: number;
-  simplifiedCount: number;
-  points: ReadonlyArray<RoutePoint>;
-  wktLineStringZ: string;
-  segmentsGeoJson: SegmentsGeoJson;
-  processingMs: number;
-}
+export type RouteColorMode = GeoColorMode | "pulse";
+export type RoutePoint = GpxTrackPoint;
+export type SegmentFeature = GpxSegmentFeature;
+export type SegmentsGeoJson = GpxParsedRoute["segmentsGeoJson"];
+export type StoredRoute = GpxParsedRoute;
 
 export interface RouteSummaryItem {
   externalId: string;
   title: string;
   activityType: string;
-  source: string;
+  source: RouteSource;
   startedAt: string;
   distanceM: number;
   elevationGainM: number;
   durationSec: number;
-  gapPaceSecKm: number;
+  gapPaceSecKm: number | null;
   paHrDecouplingPct: number | null;
   pointsCount: number;
 }
@@ -148,15 +111,6 @@ function minettiCost(gradeFraction: number): number {
 
 function minettiRatio(gradePct: number): number {
   return clamp(minettiCost(gradePct / 100) / MINETTI_FLAT_COST, 0.5, 3);
-}
-
-function gradeColorHex(gradePct: number): string {
-  if (gradePct < -6) return "#22D3EE";
-  if (gradePct < -2) return "#34D399";
-  if (gradePct < 2) return "#A3E635";
-  if (gradePct < 6) return "#FACC15";
-  if (gradePct < 10) return "#FB923C";
-  return "#EF4444";
 }
 
 function mean(values: readonly number[]): number {
@@ -330,36 +284,23 @@ function buildSeedRoute(spec: SeedSpec): StoredRoute {
   if (vertexIndexes[vertexIndexes.length - 1] !== count - 1) {
     vertexIndexes.push(count - 1);
   }
-  const features: SegmentFeature[] = [];
-  for (let v = 1; v < vertexIndexes.length; v += 1) {
-    const fromIndex = at(vertexIndexes, v - 1);
-    const toIndex = at(vertexIndexes, v);
-    const a = points[fromIndex];
-    const b = points[toIndex];
-    if (a === undefined || b === undefined) continue;
-    const run = b.cumDistM - a.cumDistM;
-    const segGrade = run > 0 ? roundTo(((b.eleM - a.eleM) / run) * 100, 2) : 0;
-    features.push({
-      type: "Feature",
-      properties: {
-        index: v - 1,
-        gradePct: segGrade,
-        hrBpm: Math.round(mean(hrBpm.slice(fromIndex, toIndex + 1))),
-        colorHex: gradeColorHex(segGrade),
-      },
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [a.lon, a.lat, a.eleM],
-          [b.lon, b.lat, b.eleM],
-        ],
-      },
+  const simplifiedPoints: RoutePoint[] = [];
+  for (let v = 0; v < vertexIndexes.length; v += 1) {
+    const idx = vertexIndexes[v]!;
+    const point = points[idx]!;
+    if (v === 0) {
+      simplifiedPoints.push(point);
+      continue;
+    }
+    const prev = points[vertexIndexes[v - 1]!]!;
+    const run = point.cumDistM - prev.cumDistM;
+    const segGrade = run > 0 ? roundTo(((point.eleM - prev.eleM) / run) * 100, 2) : 0;
+    simplifiedPoints.push({
+      ...point,
+      gradePct: segGrade,
+      hrBpm: Math.round(mean(hrBpm.slice(vertexIndexes[v - 1]!, idx + 1))),
     });
   }
-
-  const wktLineStringZ = `LINESTRING Z(${points
-    .map((p) => `${p.lon} ${p.lat} ${p.eleM}`)
-    .join(", ")})`;
 
   return {
     externalId: spec.externalId,
@@ -380,8 +321,8 @@ function buildSeedRoute(spec: SeedSpec): StoredRoute {
     pointsCount: count,
     simplifiedCount: vertexIndexes.length,
     points,
-    wktLineStringZ,
-    segmentsGeoJson: { type: "FeatureCollection", features },
+    wktLineStringZ: toPostgisLineStringZ(simplifiedPoints),
+    segmentsGeoJson: buildColoredSegmentsGeoJson(simplifiedPoints, "grade"),
     processingMs: 1,
   };
 }

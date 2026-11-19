@@ -143,7 +143,7 @@ export function calculateGapPaceSecKm(
   let distanceM = 0;
   let elapsedMs = 0;
   let adjustedMs = 0;
-  let prev = points[0]!;
+  const prev = points[0]!;
   let prevTime = prev.timeMs;
   let prevDist = prev.cumDistM;
   let prevTimeValid = typeof prevTime === "number" && Number.isFinite(prevTime);
