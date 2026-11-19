@@ -1,21 +1,7 @@
 import Link from "next/link";
+import { HomeDashboardClient } from "@/components/home/HomeDashboardClient";
 import { BiometricHeatmap } from "@/components/ui/BiometricHeatmap";
 import { LiveIslandControls } from "@/components/ui/LiveIsland";
-import { HOME_KPIS, type KpiMetric } from "@/lib/mock-data";
-
-const ACCENT_BORDER: Record<KpiMetric["accent"], string> = {
-  recovery: "border-accent-recovery/40",
-  strain: "border-accent-strain/40",
-  sleep: "border-accent-sleep/40",
-  alert: "border-accent-alert/40",
-};
-
-const ACCENT_TEXT: Record<KpiMetric["accent"], string> = {
-  recovery: "text-accent-recovery",
-  strain: "text-accent-strain",
-  sleep: "text-accent-sleep",
-  alert: "text-accent-alert",
-};
 
 export default function HomePage() {
   return (
@@ -37,33 +23,7 @@ export default function HomePage() {
         </Link>
       </header>
 
-      <section
-        aria-label="Indicadores principales"
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        {HOME_KPIS.map((kpi) => (
-          <article
-            key={kpi.id}
-            className={`rounded-2xl border bg-surface p-5 ${ACCENT_BORDER[kpi.accent]}`}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
-                {kpi.label}
-              </span>
-              <span className={`text-xs font-semibold tabular-nums ${ACCENT_TEXT[kpi.accent]}`}>
-                {kpi.delta}
-              </span>
-            </div>
-            <div className="mt-4 flex items-baseline gap-1.5">
-              <span className="text-3xl font-semibold tracking-tight text-ink-primary tabular-nums">
-                {kpi.value}
-              </span>
-              <span className="text-xs font-medium text-ink-secondary">{kpi.unit}</span>
-            </div>
-            <p className="mt-3 text-xs text-ink-secondary">Fuente: {kpi.source}</p>
-          </article>
-        ))}
-      </section>
+      <HomeDashboardClient />
 
       <section
         aria-labelledby="live-island-lab"
