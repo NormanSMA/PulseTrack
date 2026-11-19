@@ -12,11 +12,13 @@ import {
 } from "react";
 import { UPlotChart, type ChartAccent } from "@/components/charts/UPlotChart";
 import { useLiveIsland } from "@/components/ui/LiveIsland";
+import { ConsistencyPills30d } from "@/components/ui/TelemetryPrimitives";
 import {
   buildRenphoChartModel,
   type RenphoMetricKey,
   type RenphoSeriesPoint,
 } from "@/lib/charts/uplot-series";
+import { buildMockHeatmapDays } from "@/lib/mock-data";
 
 export type AcwrZone = "undertraining" | "optimal" | "caution" | "high_risk";
 
@@ -871,6 +873,54 @@ export function GymDashboardClient() {
       ? latestTonnage.tonnageKg - previousTonnage.tonnageKg
       : null;
 
+  const tonnageDeltaPct =
+    latestTonnage && previousTonnage && previousTonnage.tonnageKg > 0
+      ? ((latestTonnage.tonnageKg - previousTonnage.tonnageKg) / previousTonnage.tonnageKg) * 100
+      : null;
+
+  const totalSessionsCount = useMemo(() => {
+    if (gymData.weeklyTonnage.length > 0) {
+      return gymData.weeklyTonnage.reduce((sum, entry) => sum + entry.sessionsCount, 0);
+    }
+    return gymData.sessions.length;
+  }, [gymData.sessions.length, gymData.weeklyTonnage]);
+
+  const totalSetsCount = useMemo(
+    () => gymData.sessions.reduce((sum, session) => sum + session.sets, 0),
+    [gymData.sessions],
+  );
+
+  const totalRecentTonnageKg = useMemo(
+    () => gymData.sessions.reduce((sum, session) => sum + session.totalVolumeKg, 0),
+    [gymData.sessions],
+  );
+
+  const activeRoutineSummary = useMemo(() => {
+    if (!activeRoutine) {
+      return { totalSets: 0, estimatedMinutes: 0, exercisesCount: 0 };
+    }
+    const totalSets = activeRoutine.exercises.reduce((sum, ex) => sum + ex.sets, 0);
+    const totalSeconds = activeRoutine.exercises.reduce(
+      (sum, ex) => sum + ex.sets * (45 + ex.restSeconds),
+      0,
+    );
+    return {
+      totalSets,
+      estimatedMinutes: Math.max(20, Math.round(totalSeconds / 60)),
+      exercisesCount: activeRoutine.exercises.length,
+    };
+  }, [activeRoutine]);
+
+  const consistencyDays30d = useMemo(() => {
+    const recent30 = buildMockHeatmapDays().slice(-30);
+    const sessionDates = new Set(gymData.sessions.map((session) => session.date));
+    return recent30.map((day, index): "done" | "rest" | "today" => {
+      if (sessionDates.has(day.date)) return "done";
+      if (index === recent30.length - 1) return "today";
+      return day.gym >= 2 ? "done" : "rest";
+    });
+  }, [gymData.sessions]);
+
   const handleExportGarmin = useCallback(async () => {
     if (!activeRoutine || exportBusy) return;
     setExportBusy(true);
@@ -1071,6 +1121,94 @@ export function GymDashboardClient() {
           Iniciar descanso 01:30
         </button>
       </header>
+
+      <section
+        aria-label="Rutina del dia Lift AI"
+        className="space-y-4 rounded-3xl border border-border-subtle bg-void p-5 sm:p-6"
+      >
+        <div className="flex flex-col gap-5 rounded-2xl border border-dashed border-border-strong bg-surface p-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-widest text-accent-recovery">
+                Rutina del dia · Lift AI
+              </span>
+              {activeRoutine ? (
+                <span className="rounded-full border border-border-strong bg-elevated px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-ink-primary">
+                  {activeRoutine.splitTag}
+                </span>
+              ) : null}
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight text-ink-primary sm:text-3xl">
+              {activeRoutine ? activeRoutine.name : "Sin rutina activa"}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="rounded-full border border-border-subtle bg-void px-3 py-1 text-xs font-medium text-ink-secondary tabular-nums">
+                {activeRoutineSummary.estimatedMinutes} min estimados
+              </span>
+              <span className="rounded-full border border-border-subtle bg-void px-3 py-1 text-xs font-medium text-ink-secondary tabular-nums">
+                {activeRoutineSummary.totalSets} series
+              </span>
+              <span className="rounded-full border border-border-subtle bg-void px-3 py-1 text-xs font-medium text-ink-secondary tabular-nums">
+                {activeRoutineSummary.exercisesCount} ejercicios
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={!activeRoutine || exportBusy}
+            aria-busy={exportBusy}
+            onClick={() => void handleExportGarmin()}
+            className="min-h-11 min-w-11 shrink-0 rounded-full bg-ink-primary px-6 text-xs font-semibold uppercase tracking-wider text-void pt-motion-gpu hover:bg-ink-primary/90 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary focus-visible:ring-offset-2 focus-visible:ring-offset-void disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {exportBusy ? "Exportando..." : "Exportar a Garmin Connect"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" aria-label="KPIs de entrenamiento">
+          <article className="rounded-2xl border border-border-subtle bg-surface p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+              Sesiones
+            </p>
+            <p className="mt-3 text-4xl font-bold tracking-tight text-ink-primary tabular-nums sm:text-5xl">
+              {totalSessionsCount}
+            </p>
+            <p className="mt-2 text-xs font-medium text-accent-recovery tabular-nums">
+              {latestTonnage ? `${latestTonnage.sessionsCount} esta semana` : "Registro activo"}
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-border-subtle bg-surface p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+              Series
+            </p>
+            <p className="mt-3 text-4xl font-bold tracking-tight text-ink-primary tabular-nums sm:text-5xl">
+              {totalSetsCount}
+            </p>
+            <p className="mt-2 text-xs font-medium text-ink-secondary tabular-nums">
+              En {gymData.sessions.length} sesiones recientes
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-border-subtle bg-surface p-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+              Tonelaje kg
+            </p>
+            <p className="mt-3 text-4xl font-bold tracking-tight text-ink-primary tabular-nums sm:text-5xl">
+              {latestTonnage
+                ? formatNumber(latestTonnage.tonnageKg)
+                : formatNumber(totalRecentTonnageKg)}
+            </p>
+            <p className="mt-2 text-xs font-semibold text-accent-recovery tabular-nums">
+              {tonnageDeltaPct !== null
+                ? `${tonnageDeltaPct >= 0 ? "+" : ""}${tonnageDeltaPct.toFixed(1)}% vs sem. previa`
+                : "Semana actual"}
+            </p>
+          </article>
+        </div>
+
+        <ConsistencyPills30d days={consistencyDays30d} goalLabel="Meta 4/sem" />
+      </section>
 
       {dataSourceState === "fallback" ? (
         <div
