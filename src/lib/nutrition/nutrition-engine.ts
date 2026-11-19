@@ -217,7 +217,13 @@ export function getPassiveNocturnalBiometrics() {
   };
 }
 
+const MAX_TOTAL_LOG_BYTES = 8 * 1024 * 1024;
 const nutritionByActor = new Map<string, NutritionLogItem[]>();
+let storedLogBytes = 0;
+
+function estimateLogBytes(log: NutritionLogItem): number {
+  return 256 + log.foodName.length * 2 + log.vectorSqlLiteral.length;
+}
 
 export function listNutritionLogs(actor: string): NutritionLogItem[] {
   const logs = nutritionByActor.get(actor);
@@ -231,14 +237,26 @@ export function appendNutritionLog(actor: string, log: NutritionLogItem): void {
   const logs = nutritionByActor.get(actor) ?? [];
   nutritionByActor.delete(actor);
   logs.unshift(log);
-  if (logs.length > MAX_LOGS_PER_ACTOR) logs.pop();
+  storedLogBytes += estimateLogBytes(log);
+  if (logs.length > MAX_LOGS_PER_ACTOR) {
+    const removed = logs.pop();
+    if (removed) storedLogBytes = Math.max(0, storedLogBytes - estimateLogBytes(removed));
+  }
   nutritionByActor.set(actor, logs);
-  if (nutritionByActor.size > MAX_ACTORS) {
-    const oldest = nutritionByActor.keys().next();
-    if (!oldest.done) nutritionByActor.delete(oldest.value);
+  while (nutritionByActor.size > MAX_ACTORS || storedLogBytes > MAX_TOTAL_LOG_BYTES) {
+    const oldest = nutritionByActor.entries().next();
+    if (oldest.done) break;
+    const [oldestActor, oldestLogs] = oldest.value;
+    if (oldestActor === actor && oldestLogs.length <= 1) break;
+    const dropped = oldestLogs.pop();
+    if (dropped) storedLogBytes = Math.max(0, storedLogBytes - estimateLogBytes(dropped));
+    if (oldestLogs.length === 0) {
+      nutritionByActor.delete(oldestActor);
+    }
   }
 }
 
 export function resetNutritionStore(): void {
   nutritionByActor.clear();
+  storedLogBytes = 0;
 }

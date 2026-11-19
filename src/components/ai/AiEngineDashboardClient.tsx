@@ -658,7 +658,8 @@ export function AiEngineDashboardClient() {
       return;
     }
 
-    requestSeqRef.current += 1;
+    const seq = requestSeqRef.current + 1;
+    requestSeqRef.current = seq;
     setRouting(true);
     setRouteStatusMessage("Enrutando solicitud en cascada Cloud...");
 
@@ -674,6 +675,7 @@ export function AiEngineDashboardClient() {
       });
 
       const json: unknown = await response.json().catch(() => null);
+      if (seq !== requestSeqRef.current) return;
       if (response.status >= 400 && response.status < 500) {
         const msg =
           isRecord(json) && typeof json.error === "string"
@@ -704,6 +706,7 @@ export function AiEngineDashboardClient() {
         `Respuesta completada por ${json.result.provider} (${json.result.latencyMs} ms).`,
       );
     } catch {
+      if (seq !== requestSeqRef.current) return;
       const simulated = buildLocalSimulatedRouteResult(
         selectedTask,
         trimmedPrompt,
@@ -715,7 +718,9 @@ export function AiEngineDashboardClient() {
         `Simulacion determinista local ejecutada via ${simulated.provider} (${simulated.latencyMs} ms).`,
       );
     } finally {
-      setRouting(false);
+      if (seq === requestSeqRef.current) {
+        setRouting(false);
+      }
     }
   };
 

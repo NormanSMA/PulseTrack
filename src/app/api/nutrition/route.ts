@@ -14,6 +14,7 @@ import {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const MAX_TEXT_LENGTH = 2000;
+const MAX_BODY_BYTES = 64 * 1024;
 const SELECT_SQL = `SELECT *, 1 - (embedding <=> $1::vector(768)) AS similarity
   FROM nutrition_logs WHERE user_id = $2 AND embedding IS NOT NULL
   ORDER BY embedding <=> $1::vector(768) LIMIT $3;`;
@@ -61,9 +62,22 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (searchParams.getAll("source").some(isAppleHealthSource)) {
     return fail("ADR-001: apple_health esta prohibido.", 403);
   }
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return fail("El cuerpo excede el limite de 64 KB.", 413);
+  }
+  let rawText: string;
+  try {
+    rawText = await request.text();
+  } catch {
+    return fail("No se pudo leer el cuerpo de la solicitud.");
+  }
+  if (new TextEncoder().encode(rawText).byteLength > MAX_BODY_BYTES) {
+    return fail("El cuerpo excede el limite de 64 KB.", 413);
+  }
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawText);
   } catch {
     return fail("Cuerpo JSON invalido.");
   }
