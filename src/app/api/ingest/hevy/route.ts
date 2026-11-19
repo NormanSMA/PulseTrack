@@ -4,6 +4,12 @@ import {
   assertBiometricAuthority,
   isAppleHealthSource,
 } from "@/lib/ingest/swr-policy";
+import {
+  insertCustomExercise,
+  insertSession,
+  resolveActorKey,
+} from "@/lib/sports/gym-store";
+import type { StrengthSetInput } from "@/lib/sports/types";
 
 const MAX_CSV_BYTES = 10 * 1024 * 1024;
 
@@ -242,11 +248,90 @@ export async function POST(request: Request): Promise<NextResponse> {
     const { parseHevyCsv } = await import("@/lib/ingest/hevy-csv");
     const parsed: unknown = await Promise.resolve(parseHevyCsv(csvText));
     const { summary, sessions } = extractSummaryAndSessions(parsed);
+    const actorKey = resolveActorKey(request);
+    let persistedInserted = 0;
+    let persistedDeduplicated = 0;
+
+    for (const rawSession of sessions) {
+      if (!isPlainRecord(rawSession)) continue;
+      const externalId = typeof rawSession.externalId === "string" ? rawSession.externalId : "";
+      const title = typeof rawSession.title === "string" ? rawSession.title : "";
+      const startedAt = typeof rawSession.startedAt === "string" ? rawSession.startedAt : "";
+      if (!externalId || !title || !startedAt) continue;
+
+      if (Array.isArray(rawSession.exercises)) {
+        for (const ex of rawSession.exercises) {
+          if (!isPlainRecord(ex) || ex.isCustom !== true) continue;
+          const exName = typeof ex.name === "string" ? ex.name : "";
+          if (!exName) continue;
+          insertCustomExercise(actorKey, {
+            name: exName,
+            muscleGroup: typeof ex.muscleGroup === "string" && ex.muscleGroup ? ex.muscleGroup : "custom",
+            equipment: typeof ex.equipment === "string" && ex.equipment ? ex.equipment : "custom",
+            defaultStepNote: "",
+          });
+        }
+      }
+
+      const rawSets = Array.isArray(rawSession.sets) ? rawSession.sets : [];
+      const mappedSets: StrengthSetInput[] = [];
+      for (const [idx, s] of rawSets.entries()) {
+        if (!isPlainRecord(s)) continue;
+        const exName = typeof s.exerciseName === "string" ? s.exerciseName : "";
+        const exId = typeof s.exerciseExternalId === "string" ? s.exerciseExternalId : "";
+        const weightKg = typeof s.weightKg === "number" && Number.isFinite(s.weightKg) ? s.weightKg : 0;
+        const reps = typeof s.reps === "number" && Number.isFinite(s.reps) ? s.reps : 0;
+        if (!exName || !exId || reps <= 0) continue;
+        const setType =
+          s.setType === "warmup" || s.setType === "dropset" || s.setType === "failure"
+            ? s.setType
+            : "normal";
+        mappedSets.push({
+          exerciseExternalId: exId,
+          exerciseName: exName,
+          setIndex: typeof s.setIndex === "number" ? s.setIndex : idx,
+          weightKg,
+          reps,
+          rpe: typeof s.rpe === "number" && Number.isFinite(s.rpe) ? s.rpe : null,
+          setType,
+          notes: typeof s.notes === "string" ? s.notes : null,
+        });
+      }
+
+      const parsedDate = Date.parse(startedAt);
+      const isoStartedAt = Number.isNaN(parsedDate)
+        ? new Date().toISOString()
+        : new Date(parsedDate).toISOString();
+      const totalVolumeKg =
+        typeof rawSession.totalVolumeKg === "number" && Number.isFinite(rawSession.totalVolumeKg)
+          ? rawSession.totalVolumeKg
+          : 0;
+
+      const { deduplicated } = insertSession(actorKey, {
+        externalId,
+        title,
+        date: isoStartedAt.slice(0, 10),
+        startedAt: isoStartedAt,
+        source: "hevy",
+        totalVolumeKg,
+        sets: mappedSets,
+      });
+      if (deduplicated) {
+        persistedDeduplicated += 1;
+      } else {
+        persistedInserted += 1;
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
         summary,
         sessions,
+        persistence: {
+          inserted: persistedInserted,
+          deduplicated: persistedDeduplicated,
+        },
       },
       { status: 200 },
     );

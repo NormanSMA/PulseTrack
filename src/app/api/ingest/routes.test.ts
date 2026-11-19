@@ -72,6 +72,10 @@ describe("API routes de ingesta y check-in (ADR-001)", () => {
             rejectedRows: 0,
           },
           sessions: expect.any(Array),
+          persistence: {
+            inserted: 0,
+            deduplicated: 0,
+          },
         },
       });
       expect(parseHevyCsvMock).toHaveBeenCalledTimes(1);
