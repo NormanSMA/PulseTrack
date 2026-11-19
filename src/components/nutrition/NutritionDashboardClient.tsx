@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { UPlotChart, type UPlotChartProps } from "@/components/charts/UPlotChart";
+import {
+  RadialGaugeRing,
+  SegmentedLedBar,
+  type AccentTone,
+} from "@/components/ui/TelemetryPrimitives";
 import { computeSafeYDomain, formatRecentDelta } from "@/lib/charts/uplot-series";
 import {
   computeNetEnergyBalance,
@@ -98,11 +103,65 @@ function isNutritionData(value: unknown): value is NutritionData {
     && isNocturnal(value.nocturnal) && isNutritionSnapshot(value);
 }
 
+const DAILY_MACRO_GOALS = {
+  proteinG: 160,
+  carbsG: 260,
+  fatG: 75,
+} as const;
+
+function toProgressPct(current: number, goal: number): number {
+  if (!Number.isFinite(current) || !Number.isFinite(goal) || goal <= 0) return 0;
+  return Math.max(0, (current / goal) * 100);
+}
+
 function EnergyBalance({ balance }: Pick<NutritionData, "balance">) {
-  const macros = [
-    { label: "Proteína", grams: balance.proteinTotalG },
-    { label: "Carbohidratos", grams: balance.carbsTotalG },
-    { label: "Grasa", grams: balance.fatTotalG },
+  const kcalTarget = balance.garminTotalOutKcal > 0 ? balance.garminTotalOutKcal : 2420;
+  const kcalPct = toProgressPct(balance.kcalIn, kcalTarget);
+  const progressBars: {
+    id: string;
+    label: string;
+    current: number;
+    goal: number;
+    unit: string;
+    pct: number;
+    tone: AccentTone;
+  }[] = [
+    {
+      id: "kcal",
+      label: "Calorías",
+      current: balance.kcalIn,
+      goal: kcalTarget,
+      unit: "kcal",
+      pct: kcalPct,
+      tone: kcalPct > 110 ? "alert" : "recovery",
+    },
+    {
+      id: "protein",
+      label: "Proteína",
+      current: balance.proteinTotalG,
+      goal: DAILY_MACRO_GOALS.proteinG,
+      unit: "g",
+      pct: toProgressPct(balance.proteinTotalG, DAILY_MACRO_GOALS.proteinG),
+      tone: "recovery",
+    },
+    {
+      id: "carbs",
+      label: "Carbohidratos",
+      current: balance.carbsTotalG,
+      goal: DAILY_MACRO_GOALS.carbsG,
+      unit: "g",
+      pct: toProgressPct(balance.carbsTotalG, DAILY_MACRO_GOALS.carbsG),
+      tone: "strain",
+    },
+    {
+      id: "fat",
+      label: "Grasas",
+      current: balance.fatTotalG,
+      goal: DAILY_MACRO_GOALS.fatG,
+      unit: "g",
+      pct: toProgressPct(balance.fatTotalG, DAILY_MACRO_GOALS.fatG),
+      tone: "alert",
+    },
   ];
 
   return (
@@ -111,31 +170,54 @@ function EnergyBalance({ balance }: Pick<NutritionData, "balance">) {
       <dl className="mt-4 grid gap-4 sm:grid-cols-3">
         <div className="self-center">
           <dt className="text-sm text-ink-secondary">Calorías ingeridas (PulseTrack)</dt>
-          <dd className="mt-1 text-2xl font-semibold text-ink-primary">{NUMBER.format(balance.kcalIn)} kcal</dd>
+          <dd className="mt-1 text-2xl font-semibold text-ink-primary tabular-nums">{NUMBER.format(balance.kcalIn)} kcal</dd>
         </div>
         <div className="self-center">
           <dt className="text-sm text-ink-secondary">Calorías quemadas reales (Garmin)</dt>
-          <dd className="mt-1 text-2xl font-semibold text-ink-primary">{NUMBER.format(balance.garminTotalOutKcal)} kcal</dd>
-          <dd className="mt-1 text-xs text-ink-secondary">
+          <dd className="mt-1 text-2xl font-semibold text-ink-primary tabular-nums">{NUMBER.format(balance.garminTotalOutKcal)} kcal</dd>
+          <dd className="mt-1 text-xs text-ink-secondary tabular-nums">
             {NUMBER.format(balance.garminBasalKcal)} basal + {NUMBER.format(balance.garminActiveKcal)} activo
           </dd>
         </div>
         <div className="rounded-xl border border-border-subtle bg-void p-4">
           <dt className="text-sm text-ink-secondary">Balance neto</dt>
-          <dd className="mt-1 text-3xl font-semibold text-ink-primary">
+          <dd className="mt-1 text-3xl font-semibold text-ink-primary tabular-nums">
             {balance.netBalanceKcal > 0 ? "+" : ""}{NUMBER.format(balance.netBalanceKcal)} <span className="text-sm">kcal</span>
           </dd>
         </div>
       </dl>
       <p className="mt-3 text-xs text-ink-secondary">El gasto Garmin usa valores de referencia en esta versión.</p>
-      <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border-subtle pt-4 sm:grid-cols-3">
-        {macros.map(({ label, grams }) => (
-          <div key={label}>
-            <dt className="text-sm text-ink-secondary">{label}</dt>
-            <dd className="text-lg font-semibold text-ink-primary">{NUMBER.format(grams)} g</dd>
-          </div>
-        ))}
-      </dl>
+
+      <div className="mt-4 rounded-xl border border-border-subtle bg-void p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+            Progreso diario de calorías y macronutrientes
+          </h3>
+          <span className="text-xs text-ink-secondary tabular-nums">
+            Metas: {NUMBER.format(kcalTarget)} kcal · P {DAILY_MACRO_GOALS.proteinG} g · C {DAILY_MACRO_GOALS.carbsG} g · G {DAILY_MACRO_GOALS.fatG} g
+          </span>
+        </div>
+
+        <dl className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {progressBars.map(({ id, label, current, goal, unit, pct, tone }) => (
+            <div key={id} className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs tabular-nums">
+                <dt className="font-semibold text-ink-primary">{label}</dt>
+                <dd className="text-ink-secondary">
+                  <span className="font-semibold text-ink-primary">{NUMBER.format(current)}</span> / {NUMBER.format(goal)} {unit} ·{" "}
+                  <span className="font-semibold text-ink-primary">{Math.round(pct)}%</span>
+                </dd>
+              </div>
+              <SegmentedLedBar
+                percent={pct}
+                segments={16}
+                tone={tone}
+                label={`${label}: ${NUMBER.format(current)} de ${NUMBER.format(goal)} ${unit} (${Math.round(pct)}%)`}
+              />
+            </div>
+          ))}
+        </dl>
+      </div>
     </section>
   );
 }
@@ -240,6 +322,25 @@ function MealAnalyzer({ busy, analyzing, onRegister }: {
   );
 }
 
+function latestFinite(series: readonly number[]): number | null {
+  for (let i = series.length - 1; i >= 0; i -= 1) {
+    const value = series[i];
+    if (value !== undefined && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function averageFinite(series: readonly number[]): number | null {
+  let sum = 0;
+  let count = 0;
+  for (const value of series) {
+    if (!Number.isFinite(value)) continue;
+    sum += value;
+    count += 1;
+  }
+  return count > 0 ? sum / count : null;
+}
+
 function NocturnalCharts({ nocturnal }: Pick<NutritionData, "nocturnal">) {
   const charts = useMemo(() => NOCTURNAL_CHARTS.map(({ key, ...chart }): UPlotChartProps => {
     const values = nocturnal[key];
@@ -251,12 +352,133 @@ function NocturnalCharts({ nocturnal }: Pick<NutritionData, "nocturnal">) {
     };
   }), [nocturnal]);
 
+  const latestSleep = latestFinite(nocturnal.sleepScoreSeries);
+  const avgSleep = averageFinite(nocturnal.sleepScoreSeries);
+  const latestHrv = latestFinite(nocturnal.hrvRmssdSeries);
+  const latestTemp = latestFinite(nocturnal.campTempCSeries);
+  const latestPressure = latestFinite(nocturnal.campPressureHpaSeries);
+
+  const sleepTone: AccentTone =
+    latestSleep === null ? "neutral" : latestSleep >= 80 ? "sleep" : latestSleep >= 65 ? "alert" : "danger";
+  const sleepStatus =
+    latestSleep === null ? "Sin datos" : latestSleep >= 80 ? "Optimo" : latestSleep >= 65 ? "Moderado" : "Bajo";
+
+  const hrvInRange = latestHrv !== null && latestHrv >= 50 && latestHrv <= 85;
+  const tempInRange = latestTemp !== null && latestTemp >= 18 && latestTemp <= 24;
+  const pressureInRange = latestPressure !== null && latestPressure >= 910 && latestPressure <= 1025;
+
+  const miniCards = [
+    {
+      id: "hrv",
+      label: "VFC Nocturna ms",
+      value: latestHrv === null ? "--" : `${Math.round(latestHrv)}`,
+      unit: "ms",
+      rangeLabel: "Rango 50-85 ms",
+      inRange: hrvInRange,
+      status: latestHrv === null ? "Sin datos" : hrvInRange ? "Normal" : "Fuera de rango",
+      valueTone: "text-accent-sleep",
+    },
+    {
+      id: "temp",
+      label: "Temp Campamento C",
+      value: latestTemp === null ? "--" : latestTemp.toFixed(1),
+      unit: "C",
+      rangeLabel: "Rango 18-24 C",
+      inRange: tempInRange,
+      status: latestTemp === null ? "Sin datos" : tempInRange ? "Normal" : "Fuera de rango",
+      valueTone: "text-accent-alert",
+    },
+    {
+      id: "pressure",
+      label: "Presion hPa",
+      value: latestPressure === null ? "--" : `${Math.round(latestPressure)}`,
+      unit: "hPa",
+      rangeLabel: "Rango 910-1025 hPa",
+      inRange: pressureInRange,
+      status: latestPressure === null ? "Sin datos" : pressureInRange ? "Normal" : "Baja",
+      valueTone: "text-accent-strain",
+    },
+  ] as const;
+
   return (
     <section aria-labelledby="nocturnal-title" className="space-y-4">
       <div>
         <h2 id="nocturnal-title" className="text-lg font-semibold text-ink-primary">Biometría nocturna y sensor pasivo Forerunner 165</h2>
         <p className="mt-1 text-sm text-ink-secondary">Series de referencia de VFC, temperatura y presión.</p>
       </div>
+
+      <div
+        aria-label="Resumen de Sueño y Biometría Nocturna"
+        className="rounded-2xl border border-border-subtle bg-void p-4 sm:p-5"
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border-subtle pb-3">
+          <h3 className="text-sm font-semibold text-ink-primary">
+            Resumen de Sueño y Biometría Nocturna
+          </h3>
+          <span className="text-xs text-ink-secondary tabular-nums">
+            Última noche · ventana {nocturnal.timestampsSec.length} d
+          </span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-[12.5rem_1fr] md:items-stretch">
+          <RadialGaugeRing
+            percent={latestSleep ?? 0}
+            value={latestSleep === null ? "--" : `${Math.round(latestSleep)}`}
+            caption="Sleep Score"
+            tone={sleepTone}
+            footer={
+              <div className="space-y-1 text-xs tabular-nums">
+                <span
+                  className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                    sleepTone === "sleep"
+                      ? "border-accent-sleep/30 bg-accent-sleep/15 text-accent-sleep"
+                      : sleepTone === "alert"
+                        ? "border-accent-alert/30 bg-accent-alert/15 text-accent-alert"
+                        : sleepTone === "danger"
+                          ? "border-accent-danger/30 bg-accent-danger/15 text-accent-danger"
+                          : "border-border-strong bg-elevated text-ink-secondary"
+                  }`}
+                >
+                  {sleepStatus}
+                </span>
+                <p className="text-ink-secondary">
+                  Media 7d: {avgSleep === null ? "--" : avgSleep.toFixed(1)}
+                </p>
+              </div>
+            }
+          />
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {miniCards.map((card) => (
+              <article
+                key={card.id}
+                className="flex flex-col justify-between rounded-2xl border border-border-subtle bg-surface p-4"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-medium text-ink-secondary">{card.label}</p>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                      card.inRange
+                        ? "border-accent-recovery/30 bg-accent-recovery/15 text-accent-recovery"
+                        : "border-accent-alert/30 bg-accent-alert/15 text-accent-alert"
+                    }`}
+                  >
+                    {card.status}
+                  </span>
+                </div>
+                <div className="mt-4">
+                  <p className={`text-2xl font-semibold tracking-tight tabular-nums ${card.valueTone}`}>
+                    {card.value}
+                    <span className="ml-1 text-xs font-normal text-ink-secondary">{card.unit}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-ink-secondary tabular-nums">{card.rangeLabel}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {charts.map((chart) => (
           <div key={chart.seriesLabel} className="min-w-0 rounded-2xl border border-border-subtle bg-surface p-3 sm:p-4">

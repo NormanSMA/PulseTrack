@@ -10,6 +10,11 @@ import type {
   SegmentCollection,
   SegmentFeature,
 } from "@/components/maps/GpxMapViewer";
+import {
+  RadialGaugeRing,
+  SegmentedLedBar,
+  type AccentTone,
+} from "@/components/ui/TelemetryPrimitives";
 
 interface RoutePoint {
   lat: number;
@@ -223,8 +228,105 @@ function formatPace(secPerKm: number | null): string {
   return `${m}:${s}/km`;
 }
 
+function formatPaceCompact(secPerKm: number | null): string {
+  if (secPerKm === null || !Number.isFinite(secPerKm) || secPerKm <= 0) {
+    return "--:--";
+  }
+  const total = Math.round(secPerKm);
+  const m = Math.floor(total / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
 function formatNumber(value: number | null, decimals: number): string {
   return value === null || !Number.isFinite(value) ? "--" : value.toFixed(decimals);
+}
+
+interface HrZoneBucket {
+  id: string;
+  label: string;
+  rangeLabel: string;
+  tone: AccentTone;
+  count: number;
+  percent: number;
+}
+
+function computeHrZones(points: readonly RoutePoint[]): {
+  zones: HrZoneBucket[];
+  totalSamples: number;
+} {
+  let z12 = 0;
+  let z3 = 0;
+  let z4 = 0;
+  let z5 = 0;
+
+  for (const point of points) {
+    if (point.hrBpm === null || !Number.isFinite(point.hrBpm) || point.hrBpm <= 0) {
+      continue;
+    }
+    if (point.hrBpm >= 170) {
+      z5 += 1;
+    } else if (point.hrBpm >= 155) {
+      z4 += 1;
+    } else if (point.hrBpm >= 140) {
+      z3 += 1;
+    } else {
+      z12 += 1;
+    }
+  }
+
+  const totalSamples = z12 + z3 + z4 + z5;
+  const pct = (count: number) => (totalSamples > 0 ? (count / totalSamples) * 100 : 0);
+
+  return {
+    totalSamples,
+    zones: [
+      {
+        id: "z1-z2",
+        label: "Z1-Z2 Aerobico",
+        rangeLabel: "< 140 bpm",
+        tone: "recovery",
+        count: z12,
+        percent: pct(z12),
+      },
+      {
+        id: "z3",
+        label: "Z3 Tempo",
+        rangeLabel: "140-154 bpm",
+        tone: "strain",
+        count: z3,
+        percent: pct(z3),
+      },
+      {
+        id: "z4",
+        label: "Z4 Umbral",
+        rangeLabel: "155-169 bpm",
+        tone: "alert",
+        count: z4,
+        percent: pct(z4),
+      },
+      {
+        id: "z5",
+        label: "Z5 Max",
+        rangeLabel: ">= 170 bpm",
+        tone: "danger",
+        count: z5,
+        percent: pct(z5),
+      },
+    ],
+  };
+}
+
+function computeGapGaugePercent(gapPaceSecKm: number | null): number {
+  if (gapPaceSecKm === null || !Number.isFinite(gapPaceSecKm) || gapPaceSecKm <= 0) {
+    return 0;
+  }
+  return Math.max(12, Math.min(100, Math.round(((600 - gapPaceSecKm) / 420) * 100)));
+}
+
+function computePaHrGaugePercent(paHrPct: number | null): number {
+  if (paHrPct === null || !Number.isFinite(paHrPct)) return 0;
+  return Math.max(0, Math.min(100, (Math.abs(paHrPct) / 10) * 100));
 }
 
 function buildElevation(points: RoutePoint[]): {
@@ -409,7 +511,24 @@ export function RoutesDashboardClient() {
     [route],
   );
 
+  const hrZones = useMemo(
+    () => (route ? computeHrZones(route.points) : null),
+    [route],
+  );
+
   const withinBudget = route !== null && route.processingMs < ADR_BUDGET_MS;
+  const paHrPct = route?.paHrDecouplingPct ?? null;
+  const paHrStable = paHrPct !== null && paHrPct <= 5;
+  const paHrTone: AccentTone =
+    paHrPct === null ? "neutral" : paHrStable ? "recovery" : "alert";
+  const gapDeltaSec =
+    route !== null &&
+    route.gapPaceSecKm !== null &&
+    route.rawPaceSecKm !== null &&
+    Number.isFinite(route.gapPaceSecKm) &&
+    Number.isFinite(route.rawPaceSecKm)
+      ? Math.round(route.gapPaceSecKm - route.rawPaceSecKm)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -562,6 +681,134 @@ export function RoutesDashboardClient() {
       {route ? (
         <>
           <section
+            aria-labelledby="route-advanced-metrics-title"
+            className="rounded-2xl border border-border-subtle bg-void p-4 sm:p-5"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border-subtle pb-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-accent-strain">
+                  Telemetria fisiologica
+                </p>
+                <h2
+                  id="route-advanced-metrics-title"
+                  className="mt-0.5 text-base font-semibold text-ink-primary sm:text-lg"
+                >
+                  Metricas Avanzadas de Rendimiento
+                </h2>
+              </div>
+              <p className="text-xs text-ink-secondary tabular-nums">
+                {route.title} · {(route.distanceM / 1000).toFixed(2)} km
+              </p>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:col-span-5">
+                <RadialGaugeRing
+                  percent={computeGapGaugePercent(route.gapPaceSecKm)}
+                  value={formatPaceCompact(route.gapPaceSecKm)}
+                  caption="GAP Minetti"
+                  tone="strain"
+                  footer={
+                    <div className="space-y-1 text-xs tabular-nums">
+                      <p className="font-semibold text-ink-primary">
+                        Ritmo GAP vs Real
+                      </p>
+                      <p className="text-ink-secondary">
+                        Real {formatPace(route.rawPaceSecKm)}
+                      </p>
+                      {gapDeltaSec !== null ? (
+                        <span className="inline-block rounded-full border border-accent-strain/30 bg-accent-strain/10 px-2 py-0.5 text-xs font-semibold text-accent-strain">
+                          {gapDeltaSec <= 0 ? "" : "+"}
+                          {gapDeltaSec} s/km vs real
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                />
+
+                <RadialGaugeRing
+                  percent={computePaHrGaugePercent(paHrPct)}
+                  value={paHrPct === null ? "--" : `${paHrPct.toFixed(1)}%`}
+                  caption="Pa:Hr"
+                  tone={paHrTone}
+                  footer={
+                    <div className="space-y-1 text-xs tabular-nums">
+                      <p className="font-semibold text-ink-primary">
+                        Desacoplamiento Pa:Hr
+                      </p>
+                      <span
+                        className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          paHrPct === null
+                            ? "border-border-strong bg-elevated text-ink-secondary"
+                            : paHrStable
+                              ? "border-accent-recovery/30 bg-accent-recovery/15 text-accent-recovery"
+                              : "border-accent-alert/30 bg-accent-alert/15 text-accent-alert"
+                        }`}
+                      >
+                        {paHrPct === null
+                          ? "Sin datos"
+                          : paHrStable
+                            ? "Estable <= 5%"
+                            : "Deriva > 5%"}
+                      </span>
+                      <p className="text-ink-secondary">
+                        Deriva termica {formatNumber(route.thermalDriftBpm, 1)} bpm
+                      </p>
+                    </div>
+                  }
+                />
+              </div>
+
+              <div className="flex flex-col justify-between rounded-2xl border border-border-subtle bg-surface p-4 lg:col-span-7">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink-primary">
+                      Distribucion por Zonas de FC
+                    </h3>
+                    <p className="text-xs text-ink-secondary tabular-nums">
+                      {hrZones && hrZones.totalSamples > 0
+                        ? `${hrZones.totalSamples} muestras cardiacas · FC media ${formatNumber(route.avgHrBpm, 0)} bpm`
+                        : "Sin muestras de frecuencia cardiaca en este GPX"}
+                    </p>
+                  </div>
+                  <span className="rounded-lg border border-border-subtle bg-void px-2.5 py-1 text-xs font-semibold text-ink-secondary tabular-nums">
+                    Umbral Pa:Hr 5.0%
+                  </span>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {hrZones?.zones.map((zone) => (
+                    <div key={zone.id} className="space-y-1.5">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs tabular-nums">
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-semibold text-ink-primary">
+                            {zone.label}
+                          </span>
+                          <span className="text-ink-secondary">
+                            {zone.rangeLabel}
+                          </span>
+                        </div>
+                        <span className="font-semibold text-ink-primary">
+                          {zone.percent.toFixed(1)}%{" "}
+                          <span className="font-normal text-ink-secondary">
+                            ({zone.count} pts)
+                          </span>
+                        </span>
+                      </div>
+                      <SegmentedLedBar
+                        percent={zone.percent}
+                        segments={16}
+                        tone={zone.tone}
+                        label={`${zone.label} ${zone.percent.toFixed(1)} por ciento`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
             aria-label="Indicadores de ruta"
             className="grid grid-cols-2 gap-3 lg:grid-cols-4"
           >
@@ -581,7 +828,13 @@ export function RoutesDashboardClient() {
               label="Desacoplamiento Pa:Hr"
               value={`${formatNumber(route.paHrDecouplingPct, 1)} %`}
               hint={`Deriva termica ${formatNumber(route.thermalDriftBpm, 1)} bpm`}
-              tone="text-accent-alert"
+              tone={
+                paHrPct === null
+                  ? "text-ink-primary"
+                  : paHrStable
+                    ? "text-accent-recovery"
+                    : "text-accent-alert"
+              }
             />
             <Kpi
               label="Procesamiento JS"

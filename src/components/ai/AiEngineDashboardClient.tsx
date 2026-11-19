@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  RadialGaugeRing,
+  SegmentedLedBar,
+  type AccentTone,
+} from "@/components/ui/TelemetryPrimitives";
+import {
   DEFAULT_WHAT_IF_SLIDERS,
   ONNX_MODEL_METADATA,
   simulateWhatIf,
@@ -545,6 +550,18 @@ function formatTaskKindLabel(taskKind: AiTaskKind): string {
   return "Vision Multimodal";
 }
 
+function quotaLedTone(quotaUsedPct: number): AccentTone {
+  if (quotaUsedPct >= 85) return "danger";
+  if (quotaUsedPct >= 60) return "alert";
+  return "strain";
+}
+
+function successLedTone(successRatePct: number): AccentTone {
+  if (successRatePct >= 95) return "recovery";
+  if (successRatePct >= 80) return "alert";
+  return "danger";
+}
+
 export function AiEngineDashboardClient() {
   const initialFallback = useMemo(() => buildFallbackTelemetry(), []);
   const initialScriptable = useMemo(() => buildFallbackScriptable(), []);
@@ -816,10 +833,12 @@ export function AiEngineDashboardClient() {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           {providers.map((provider) => {
             const badge = formatStateBadge(provider.state);
+            const quotaTone = quotaLedTone(provider.quotaUsedPct);
+            const successTone = successLedTone(provider.successRatePct);
             return (
               <article
                 key={provider.provider}
-                className="flex flex-col justify-between rounded-2xl border border-border-subtle bg-surface p-4"
+                className="flex flex-col justify-between rounded-2xl border border-border-subtle bg-void p-4 pt-motion-gpu motion-reduce:transform-none hover:border-border-strong"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2">
@@ -843,7 +862,39 @@ export function AiEngineDashboardClient() {
                   </p>
                 </div>
 
-                <dl className="mt-4 grid grid-cols-2 gap-2 border-t border-border-subtle pt-3 text-xs">
+                <div className="mt-3 space-y-2.5 rounded-xl border border-border-subtle bg-surface p-3">
+                  <div className="space-y-1">
+                    <div className="flex items-baseline justify-between gap-2 text-xs tabular-nums">
+                      <span className="text-ink-secondary">Cuota utilizada</span>
+                      <span className="font-semibold text-ink-primary">
+                        {provider.quotaUsedPct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <SegmentedLedBar
+                      percent={provider.quotaUsedPct}
+                      segments={12}
+                      tone={quotaTone}
+                      label={`Cuota utilizada ${provider.label} ${provider.quotaUsedPct.toFixed(1)} por ciento`}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-baseline justify-between gap-2 text-xs tabular-nums">
+                      <span className="text-ink-secondary">Tasa de exito</span>
+                      <span className="font-semibold text-accent-recovery">
+                        {provider.successRatePct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <SegmentedLedBar
+                      percent={provider.successRatePct}
+                      segments={12}
+                      tone={successTone}
+                      label={`Tasa de exito ${provider.label} ${provider.successRatePct.toFixed(1)} por ciento`}
+                    />
+                  </div>
+                </div>
+
+                <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border-subtle pt-3 text-xs">
                   <div>
                     <dt className="text-ink-secondary">Latencia p50 / p95</dt>
                     <dd className="mt-0.5 font-semibold text-ink-primary tabular-nums">
@@ -1299,6 +1350,17 @@ function WhatIfSimulator() {
     () => [...shap.contributions].sort((a, b) => Math.abs(b.deltaPoints) - Math.abs(a.deltaPoints)),
     [shap.contributions],
   );
+  const readinessTone: AccentTone =
+    readinessScore >= 75 ? "recovery" : readinessScore >= 50 ? "alert" : "danger";
+  const mseRatioPct =
+    anomaly.p95Threshold > 0
+      ? Math.min(100, (anomaly.anomalyMse / anomaly.p95Threshold) * 100)
+      : 0;
+  const mseTone: AccentTone = anomaly.isAnomaly
+    ? "danger"
+    : mseRatioPct >= 75
+      ? "alert"
+      : "recovery";
 
   useEffect(() => {
     setShowLatency(true);
@@ -1372,34 +1434,82 @@ function WhatIfSimulator() {
         </fieldset>
 
         <div className="min-w-0 space-y-4">
-          <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border-subtle bg-elevated p-4">
-            <div className="col-span-2 border-b border-border-subtle pb-3">
-              <dt className="text-sm text-ink-secondary">Readiness · {readinessLabel}</dt>
-              <dd className="text-4xl font-semibold tracking-tight text-accent-recovery">
-                {readinessScore.toFixed(2)} <span className="text-sm text-ink-secondary">/ 100</span>
-              </dd>
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-border-subtle bg-void p-4 sm:grid-cols-[11.5rem_1fr]">
+            <RadialGaugeRing
+              percent={readinessScore}
+              value={readinessScore.toFixed(1)}
+              caption="Readiness"
+              tone={readinessTone}
+              footer={
+                <span
+                  className={`inline-block rounded-full border px-2 py-0.5 text-xs font-semibold tabular-nums ${
+                    readinessTone === "recovery"
+                      ? "border-accent-recovery/30 bg-accent-recovery/15 text-accent-recovery"
+                      : readinessTone === "alert"
+                        ? "border-accent-alert/30 bg-accent-alert/15 text-accent-alert"
+                        : "border-accent-danger/30 bg-accent-danger/15 text-accent-danger"
+                  }`}
+                >
+                  {readinessLabel}
+                </span>
+              }
+            />
+
+            <div className="flex flex-col justify-between gap-3">
+              <div className="rounded-xl border border-border-subtle bg-surface p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs tabular-nums">
+                  <span className="font-semibold text-ink-primary">
+                    Autoencoder · Error MSE vs p95
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                      anomaly.isAnomaly
+                        ? "border-accent-danger/30 bg-accent-danger/15 text-accent-danger"
+                        : "border-accent-recovery/30 bg-accent-recovery/15 text-accent-recovery"
+                    }`}
+                  >
+                    {anomaly.isAnomaly ? "Anomalia > p95" : "Nominal <= p95"}
+                  </span>
+                </div>
+                <p className="mt-1.5 font-mono text-xs text-ink-secondary tabular-nums">
+                  MSE{" "}
+                  <span className={anomaly.isAnomaly ? "font-semibold text-accent-danger" : "font-semibold text-ink-primary"}>
+                    {anomaly.anomalyMse.toFixed(4)}
+                  </span>{" "}
+                  / umbral p95 = {anomaly.p95Threshold.toFixed(3)} ({Math.round(mseRatioPct)}%)
+                </p>
+                <div className="mt-2">
+                  <SegmentedLedBar
+                    percent={mseRatioPct}
+                    segments={16}
+                    tone={mseTone}
+                    label={`Error MSE del Autoencoder ${anomaly.anomalyMse.toFixed(4)} frente al umbral p95 ${anomaly.p95Threshold.toFixed(3)}`}
+                  />
+                </div>
+              </div>
+
+              <dl className="grid grid-cols-3 gap-2 rounded-xl border border-border-subtle bg-surface p-3 text-xs tabular-nums">
+                <div>
+                  <dt className="text-ink-secondary">Strain</dt>
+                  <dd className="mt-0.5 text-base font-semibold text-accent-strain">
+                    {strainScore.toFixed(2)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-secondary">ACWR</dt>
+                  <dd className="mt-0.5 text-base font-semibold text-ink-primary">
+                    {acwr.toFixed(2)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-secondary">Latencia</dt>
+                  <dd className="mt-0.5 text-base font-semibold text-ink-primary">
+                    {showLatency ? `${inferenceLatencyMs.toFixed(3)} ms` : "Midiendo…"}
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <div>
-              <dt className="text-xs text-ink-secondary">Strain</dt>
-              <dd className="text-lg font-semibold text-accent-strain">{strainScore.toFixed(2)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-ink-secondary">ACWR</dt>
-              <dd className="text-lg font-semibold text-ink-primary">{acwr.toFixed(2)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-ink-secondary">Latencia de inferencia</dt>
-              <dd className="text-lg font-semibold text-ink-primary">
-                {showLatency ? `${inferenceLatencyMs.toFixed(3)} ms` : "Midiendo…"}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-ink-secondary">Autoencoder · MSE / umbral p95</dt>
-              <dd className={`text-lg font-semibold ${anomaly.isAnomaly ? "text-accent-alert" : "text-ink-primary"}`}>
-                {anomaly.anomalyMse.toFixed(4)} / {anomaly.p95Threshold.toFixed(3)}
-              </dd>
-            </div>
-          </dl>
+          </div>
           {anomaly.isAnomaly && (
             <p role="alert" className="rounded-xl border border-border-strong bg-void p-3 text-sm text-accent-alert">
               Alerta preventiva. {anomaly.liveIslandAlert}
