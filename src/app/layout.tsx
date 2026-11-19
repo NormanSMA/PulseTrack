@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/ui/AppShell";
+import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased">
+        <ServiceWorkerRegister />
         <AppShell>{children}</AppShell>
       </body>
     </html>
