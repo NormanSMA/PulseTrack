@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { SegmentedLedBar, type AccentTone } from "@/components/ui/TelemetryPrimitives";
 
 export type LiveIslandState = "idle" | "syncing" | "gym-timer" | "alert";
 
@@ -32,6 +33,8 @@ const STATE_META: Record<
     dotClass: string;
     borderClass: string;
     textClass: string;
+    ledTone: AccentTone;
+    ledLabel: string;
   }
 > = {
   idle: {
@@ -40,17 +43,21 @@ const STATE_META: Record<
     detail: "Recovery 86%",
     announcement: "LiveIsland en reposo: Recovery 86 por ciento.",
     dotClass: "bg-accent-recovery",
-    borderClass: "border-border-strong",
+    borderClass: "border-border-subtle",
     textClass: "text-accent-recovery",
+    ledTone: "recovery",
+    ledLabel: "Estado en reposo",
   },
   syncing: {
     badge: "SYNC",
     title: "Garmin + RENPHO",
     detail: "Cache 15m · idb",
-    announcement: "Sincronización inalámbrica con Garmin y RENPHO iniciada.",
+    announcement: "Sincronizacion inalambrica con Garmin y RENPHO iniciada.",
     dotClass: "bg-accent-strain pt-pulse-opacity",
-    borderClass: "border-accent-strain/70",
+    borderClass: "border-accent-strain/50",
     textClass: "text-accent-strain",
+    ledTone: "strain",
+    ledLabel: "Progreso de sincronizacion",
   },
   "gym-timer": {
     badge: "REST",
@@ -58,8 +65,10 @@ const STATE_META: Record<
     detail: "Hevy Set #4",
     announcement: "Temporizador de descanso iniciado.",
     dotClass: "bg-accent-sleep pt-pulse-opacity",
-    borderClass: "border-accent-sleep/70",
+    borderClass: "border-accent-sleep/50",
     textClass: "text-accent-sleep",
+    ledTone: "sleep",
+    ledLabel: "Progreso de descanso",
   },
   alert: {
     badge: "ALERT",
@@ -67,8 +76,10 @@ const STATE_META: Record<
     detail: "Reducir carga hoy",
     announcement: "Alerta de carga: ACWR 1.38 elevado.",
     dotClass: "bg-accent-alert pt-pulse-opacity",
-    borderClass: "border-accent-alert/80",
+    borderClass: "border-accent-alert/60",
     textClass: "text-accent-alert",
+    ledTone: "alert",
+    ledLabel: "Nivel de alerta",
   },
 };
 
@@ -133,6 +144,15 @@ export function LiveIsland() {
   const [visible, setVisible] = useState<boolean>(true);
   const [displayState, setDisplayState] = useState<LiveIslandState>(state);
   const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
+  const [maxTimerSeconds, setMaxTimerSeconds] = useState<number>(90);
+
+  useEffect(() => {
+    if (displayState !== "gym-timer") {
+      setMaxTimerSeconds(90);
+      return;
+    }
+    setMaxTimerSeconds((prev) => Math.max(prev, timerSeconds, 1));
+  }, [displayState, timerSeconds]);
 
   useEffect(() => {
     if (state === displayState) return;
@@ -154,6 +174,15 @@ export function LiveIsland() {
   const meta = STATE_META[displayState];
   const rightValue =
     displayState === "gym-timer" ? formatClock(timerSeconds) : meta.detail;
+  const showLedProgress = displayState !== "idle";
+  const ledPercent =
+    displayState === "gym-timer"
+      ? Math.round((timerSeconds / Math.max(1, maxTimerSeconds)) * 100)
+      : displayState === "syncing"
+        ? 75
+        : displayState === "alert"
+          ? 100
+          : 0;
 
   return (
     <>
@@ -163,7 +192,7 @@ export function LiveIsland() {
 
       <div className="pointer-events-none fixed inset-x-0 top-0 z-50 flex justify-center pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div
-          className={`pointer-events-auto flex min-h-11 w-[min(92vw,25rem)] items-center justify-between gap-2 rounded-full border bg-surface px-4 pt-motion-gpu motion-reduce:transition-none motion-reduce:transform-none ${
+          className={`pointer-events-auto flex min-h-11 w-[min(94vw,28rem)] items-center justify-between gap-2.5 rounded-full border bg-void px-3.5 py-1.5 pt-motion-gpu motion-reduce:transition-none motion-reduce:transform-none ${
             isTransitioning ? "will-change-[transform,opacity]" : ""
           } ${meta.borderClass} ${
             visible
@@ -171,22 +200,33 @@ export function LiveIsland() {
               : "[transform:translate3d(0,-4px,0)_scale(0.96)] opacity-0"
           }`}
         >
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <span
-              className={`h-2.5 w-2.5 shrink-0 rounded-full ${meta.dotClass}`}
+              className={`h-2 w-2 shrink-0 rounded-full ${meta.dotClass}`}
               aria-hidden="true"
             />
             <span
-              className={`text-xs font-semibold tracking-wider tabular-nums ${meta.textClass}`}
+              className={`shrink-0 text-[11px] font-semibold tracking-wider tabular-nums ${meta.textClass}`}
             >
               {meta.badge}
             </span>
-            <span className="truncate text-sm font-medium text-ink-primary tabular-nums">
+            <span className="truncate text-xs font-medium text-ink-primary tabular-nums sm:text-sm">
               {meta.title}
             </span>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {showLedProgress ? (
+              <div className="w-12 shrink-0 sm:w-16">
+                <SegmentedLedBar
+                  percent={ledPercent}
+                  segments={8}
+                  tone={meta.ledTone}
+                  label={meta.ledLabel}
+                />
+              </div>
+            ) : null}
+
             <span className="font-mono text-xs font-semibold text-ink-secondary tabular-nums">
               {rightValue}
             </span>
@@ -195,7 +235,7 @@ export function LiveIsland() {
                 type="button"
                 aria-label="Detener temporizador"
                 onClick={() => setState("idle")}
-                className="flex min-h-11 min-w-11 items-center justify-center rounded-full px-2 text-xs font-semibold text-accent-alert pt-motion-gpu hover:text-ink-primary active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border-subtle bg-surface px-2.5 text-xs font-semibold text-accent-alert pt-motion-gpu hover:border-ink-primary hover:text-ink-primary active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary"
               >
                 Stop
               </button>
@@ -236,7 +276,7 @@ export function LiveIslandControls() {
               }
               setState(item.id);
             }}
-            className={`min-h-11 rounded-full border px-4 text-xs font-semibold uppercase tracking-wider pt-motion-gpu active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`min-h-11 min-w-11 rounded-full border px-4 text-xs font-semibold uppercase tracking-wider pt-motion-gpu active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-primary disabled:cursor-not-allowed disabled:opacity-40 ${
               active
                 ? "border-ink-primary bg-ink-primary text-void"
                 : "border-border-strong bg-surface text-ink-primary hover:border-ink-primary hover:bg-elevated"

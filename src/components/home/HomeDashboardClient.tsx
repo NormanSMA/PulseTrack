@@ -1,10 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useLiveIsland } from "@/components/ui/LiveIsland";
+import {
+  MetricSparkTile,
+  RadialGaugeRing,
+  ReadinessArcGauge,
+  SegmentedLedBar,
+  type AccentTone,
+} from "@/components/ui/TelemetryPrimitives";
+import { DEFAULT_WHAT_IF_SLIDERS, simulateWhatIf } from "@/lib/ai/onnx-readiness";
+import { buildMockHeatmapDays } from "@/lib/mock-data";
 import { createDefaultSnapshot } from "@/lib/offline/idb-store";
 import {
   enqueueSubjectiveCheckin,
+  fetchWeatherWithFallback,
   flushSyncQueue,
   getRemainingCooldownMs,
   importHevyCsvFile,
@@ -73,6 +83,17 @@ function formatSignedKcal(value: number): string {
   return String(rounded);
 }
 
+function buildSevenDaySeries(
+  current: number,
+  deltas: readonly [number, number, number, number, number, number],
+  minVal = 0,
+  decimals = 1,
+): number[] {
+  const factor = 10 ** decimals;
+  const round = (val: number) => Math.round(Math.max(minVal, val) * factor) / factor;
+  return [...deltas.map((delta) => round(current + delta)), round(current)];
+}
+
 export function HomeDashboardClient() {
   const { setState: setIslandState } = useLiveIsland();
   const csvInputId = useId();
@@ -117,11 +138,25 @@ export function HomeDashboardClient() {
         setIslandState("syncing");
         const result = await syncIfStale(false);
         if (!active) return;
-        setSnapshot(result.snapshot);
-        syncSubjectiveDraftFromSnapshot(result.snapshot);
-        setCooldownMs(getRemainingCooldownMs(result.snapshot.meta.lastSyncAt));
+        let nextSnapshot = result.snapshot;
+        if (result.error) {
+          const fallbackWeather = await fetchWeatherWithFallback();
+          if (!active) return;
+          if (fallbackWeather) {
+            nextSnapshot = { ...nextSnapshot, weather: fallbackWeather };
+          }
+        }
+        setSnapshot(nextSnapshot);
+        syncSubjectiveDraftFromSnapshot(nextSnapshot);
+        setCooldownMs(getRemainingCooldownMs(nextSnapshot.meta.lastSyncAt));
         setIslandState(result.error ? "alert" : "idle");
         setIsSyncing(false);
+      } else if (isNavigatorOnline() && instant.weather?.source === "fixture") {
+        const liveWeather = await fetchWeatherWithFallback();
+        if (!active) return;
+        if (liveWeather) {
+          setSnapshot((prev) => ({ ...prev, weather: liveWeather }));
+        }
       }
     }
 
@@ -317,42 +352,207 @@ export function HomeDashboardClient() {
   const pendingHevyCount = snapshot.pendingQueue.filter((item) => item.kind === "hevy_csv").length;
   const latestHevy = hevySessions[0] ?? null;
   const syncDisabled = isSyncing || cooldownMs > 0 || !online;
+  const hasTodayCheckin = energy !== null && soreness !== null && mood !== null;
+
+  const readinessSimulation = useMemo(() => {
+    const sleepHours = Number(Math.max(0, Math.min(12, biometrics.sleepMinutes / 60)).toFixed(2));
+    return simulateWhatIf({
+      sleepHours,
+      sleepTempC: biometrics.campTempC ?? DEFAULT_WHAT_IF_SLIDERS.sleepTempC,
+      hrvRmssdMs: biometrics.hrvMs,
+      plannedGymTonnageKg: latestHevy?.totalVolumeKg ?? DEFAULT_WHAT_IF_SLIDERS.plannedGymTonnageKg,
+      plannedTrailKm: DEFAULT_WHAT_IF_SLIDERS.plannedTrailKm,
+      hydrationLiters: DEFAULT_WHAT_IF_SLIDERS.hydrationLiters,
+    });
+  }, [biometrics.campTempC, biometrics.hrvMs, biometrics.sleepMinutes, latestHevy?.totalVolumeKg]);
+
+  const readinessTone: AccentTone = readinessSimulation.anomaly.isAnomaly
+    ? "alert"
+    : readinessSimulation.readinessLabel === "Optimo"
+      ? "recovery"
+      : readinessSimulation.readinessLabel === "Moderado"
+        ? "alert"
+        : "danger";
+
+  const bentoMetrics = useMemo(() => {
+    const sleepHours = Number((biometrics.sleepMinutes / 60).toFixed(1));
+    const stressVal = biometrics.stressAvg ?? 24;
+    const weightVal = snapshot.bodyComposition?.weightKg ?? 76.4;
+
+    return [
+      {
+        id: "sleep-tile",
+        title: "Sueno",
+        value: formatMinutesToClock(biometrics.sleepMinutes),
+        unit: "h",
+        sublabel: `${biometrics.sleepEfficiencyPct}% eficiencia · Score ${biometrics.sleepScore}`,
+        series: buildSevenDaySeries(sleepHours, [-0.5, -0.2, 0.3, -0.4, 0.1, 0.2], 0, 1),
+        tone: "sleep" as AccentTone,
+        tag: `${biometrics.sleepScore} pts`,
+      },
+      {
+        id: "hrv-tile",
+        title: "VFC Nocturna",
+        value: String(Math.round(biometrics.hrvMs)),
+        unit: "ms",
+        sublabel: `${biometrics.recoveryDelta} · Garmin`,
+        series: buildSevenDaySeries(biometrics.hrvMs, [-6, -3, 2, -4, 1, 3], 10, 0),
+        tone: "recovery" as AccentTone,
+        tag: "RMSSD",
+      },
+      {
+        id: "rhr-tile",
+        title: "FC Reposo",
+        value: String(Math.round(biometrics.restingHrBpm)),
+        unit: "lpm",
+        sublabel: "Minima nocturna Garmin",
+        series: buildSevenDaySeries(biometrics.restingHrBpm, [2, 1, 0, 2, 1, 0], 35, 0),
+        tone: "strain" as AccentTone,
+        tag: "RHR",
+      },
+      {
+        id: "stress-tile",
+        title: "Estres",
+        value: biometrics.stressAvg !== null ? String(Math.round(biometrics.stressAvg)) : "--",
+        unit: "/100",
+        sublabel: `Body Battery ${biometrics.bodyBattery ?? "--"}%`,
+        series: buildSevenDaySeries(stressVal, [4, 2, -3, 5, 1, -2], 0, 0),
+        tone: (stressVal > 50 ? "alert" : "recovery") as AccentTone,
+        tag: stressVal > 50 ? "Elevado" : "Bajo",
+      },
+      {
+        id: "acwr-tile",
+        title: "Carga ACWR",
+        value: biometrics.acwr.toFixed(2),
+        unit: "ratio",
+        sublabel: `Strain ${biometrics.strainScore.toFixed(1)} idx`,
+        series: buildSevenDaySeries(biometrics.acwr, [-0.08, -0.04, 0.02, -0.03, 0.01, 0.02], 0.4, 2),
+        tone: (biometrics.acwr > 1.3 ? "alert" : "recovery") as AccentTone,
+        tag: biometrics.acwr > 1.3 ? "Precaucion" : "Optimo",
+      },
+      {
+        id: "renpho-tile",
+        title: "Peso RENPHO",
+        value: weightVal.toFixed(1),
+        unit: "kg",
+        sublabel: snapshot.bodyComposition
+          ? `Bascula ${snapshot.bodyComposition.date}`
+          : "Bascula RENPHO",
+        series: buildSevenDaySeries(weightVal, [0.5, 0.4, 0.3, 0.2, 0.1, 0.1], 30, 1),
+        tone: "strain" as AccentTone,
+        tag: snapshot.bodyComposition?.syncedToGarmin === false ? "Pendiente" : "RENPHO",
+      },
+    ] as const;
+  }, [
+    biometrics.acwr,
+    biometrics.bodyBattery,
+    biometrics.hrvMs,
+    biometrics.recoveryDelta,
+    biometrics.restingHrBpm,
+    biometrics.sleepEfficiencyPct,
+    biometrics.sleepMinutes,
+    biometrics.sleepScore,
+    biometrics.strainScore,
+    biometrics.stressAvg,
+    snapshot.bodyComposition,
+  ]);
+
+  const streakSummary = useMemo(() => {
+    const days = buildMockHeatmapDays();
+    let streak = 0;
+    for (let i = days.length - 1; i >= 0; i -= 1) {
+      const day = days[i]!;
+      const avg = Math.round((day.gym + day.routes + day.macros + day.recovery) / 4);
+      if (avg > 0) {
+        streak += 1;
+      } else {
+        break;
+      }
+    }
+    const baseCheckins = days.filter((day) => day.recovery > 0).length;
+    return {
+      activeStreakDays: hasTodayCheckin ? Math.max(1, streak + 1) : streak,
+      checkinsCount: hasTodayCheckin ? baseCheckins + 1 : baseCheckins,
+    };
+  }, [hasTodayCheckin]);
 
   return (
     <div className="space-y-6">
-      <section aria-label="Indicadores principales">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {kpis.map((kpi) => (
-            <article
-              key={kpi.id}
-              className={`rounded-2xl border bg-surface p-5 ${ACCENT_BORDER[kpi.accent]}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
-                  {kpi.label}
-                </span>
-                <span
-                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tracking-wide ${ACCENT_BADGE[kpi.accent]}`}
-                >
-                  {kpi.badge}
-                </span>
-              </div>
+      <section aria-label="Readiness ONNX y metricas clave" className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-5">
+            <ReadinessArcGauge
+              score={readinessSimulation.readinessScore}
+              label={readinessSimulation.readinessLabel}
+              summary={readinessSimulation.shap.naturalLanguageSummary}
+              tone={readinessTone}
+              badge={`ONNX ${readinessSimulation.modelVersion} · ${biometrics.recoveryDelta}`}
+            />
 
-              <div className="mt-4 flex items-baseline gap-1.5">
-                <span className="text-3xl font-semibold tracking-tight text-ink-primary tabular-nums">
-                  {kpi.value}
-                </span>
-                <span className="text-xs font-medium text-ink-secondary">{kpi.unit}</span>
+            {readinessSimulation.anomaly.isAnomaly ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-2xl border border-accent-alert/60 bg-accent-alert/10 px-4 py-3 text-xs text-accent-alert tabular-nums"
+              >
+                <p className="font-semibold uppercase tracking-wider">Alerta preventiva ONNX</p>
+                <p className="mt-1">
+                  {readinessSimulation.anomaly.liveIslandAlert ??
+                    "Desviacion del perfil homeostatico detectada."}{" "}
+                  (MSE {readinessSimulation.anomaly.anomalyMse.toFixed(3)} / p95{" "}
+                  {readinessSimulation.anomaly.p95Threshold.toFixed(3)})
+                </p>
               </div>
+            ) : null}
+          </div>
 
-              <p className={`mt-3 text-xs font-medium tabular-nums ${ACCENT_TEXT[kpi.accent]}`}>
-                {kpi.delta}
-              </p>
-            </article>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
+            {kpis.map((kpi) => (
+              <article
+                key={kpi.id}
+                className={`rounded-2xl border bg-surface p-5 ${ACCENT_BORDER[kpi.accent]}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+                    {kpi.label}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tracking-wide ${ACCENT_BADGE[kpi.accent]}`}
+                  >
+                    {kpi.badge}
+                  </span>
+                </div>
+
+                <div className="mt-4 flex items-baseline gap-1.5">
+                  <span className="text-3xl font-semibold tracking-tight text-ink-primary tabular-nums">
+                    {kpi.value}
+                  </span>
+                  <span className="text-xs font-medium text-ink-secondary">{kpi.unit}</span>
+                </div>
+
+                <p className={`mt-3 text-xs font-medium tabular-nums ${ACCENT_TEXT[kpi.accent]}`}>
+                  {kpi.delta}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Bento biometrico 7 dias">
+          {bentoMetrics.map((metric) => (
+            <MetricSparkTile
+              key={metric.id}
+              title={metric.title}
+              value={metric.value}
+              unit={metric.unit}
+              sublabel={metric.sublabel}
+              series={metric.series}
+              tone={metric.tone}
+              tag={metric.tag}
+            />
           ))}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-surface px-4 py-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-subtle bg-surface px-4 py-3 text-xs">
           <div className="flex flex-wrap items-center gap-3 text-ink-secondary">
             <span className="font-semibold uppercase tracking-wider text-ink-primary">
               Campana ambiental nocturna
@@ -506,24 +706,60 @@ export function HomeDashboardClient() {
             </div>
 
             {weather ? (
-              <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl border border-border-subtle bg-void p-3 text-center">
-                <div>
-                  <p className="text-[11px] text-ink-secondary">Temp</p>
-                  <p className="mt-0.5 text-sm font-semibold text-ink-primary tabular-nums">
-                    {weather.temperatureC.toFixed(1)} °C
-                  </p>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-12 sm:items-center">
+                <div className="sm:col-span-5">
+                  <RadialGaugeRing
+                    percent={Math.max(0, Math.min(100, (weather.temperatureC / 45) * 100))}
+                    value={`${weather.temperatureC.toFixed(1)} °C`}
+                    caption="Temp"
+                    tone={weather.temperatureC >= 30 ? "alert" : "strain"}
+                    footer={
+                      <p className="text-[11px] text-ink-secondary tabular-nums">
+                        {weather.apparentTempC !== null
+                          ? `Sensacion ${weather.apparentTempC.toFixed(1)} °C`
+                          : `${weather.pressureHpa.toFixed(0)} hPa`}
+                      </p>
+                    }
+                  />
                 </div>
-                <div>
-                  <p className="text-[11px] text-ink-secondary">Humedad</p>
-                  <p className="mt-0.5 text-sm font-semibold text-ink-primary tabular-nums">
-                    {Math.round(weather.humidityPct)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] text-ink-secondary">Viento</p>
-                  <p className="mt-0.5 text-sm font-semibold text-ink-primary tabular-nums">
-                    {weather.windKmh.toFixed(1)} km/h
-                  </p>
+
+                <div className="space-y-4 rounded-2xl border border-border-subtle bg-void p-4 sm:col-span-7">
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between text-xs">
+                      <span className="font-medium text-ink-secondary">Humedad</span>
+                      <span className="font-semibold text-ink-primary tabular-nums">
+                        {Math.round(weather.humidityPct)}%
+                      </span>
+                    </div>
+                    <SegmentedLedBar
+                      percent={weather.humidityPct}
+                      segments={12}
+                      tone={weather.humidityPct > 80 ? "alert" : "sleep"}
+                      label={`Humedad ${Math.round(weather.humidityPct)} por ciento`}
+                    />
+                  </div>
+
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between text-xs">
+                      <span className="font-medium text-ink-secondary">Viento</span>
+                      <span className="font-semibold text-ink-primary tabular-nums">
+                        {weather.windKmh.toFixed(1)} km/h
+                      </span>
+                    </div>
+                    <SegmentedLedBar
+                      percent={Math.min(100, (weather.windKmh / 60) * 100)}
+                      segments={12}
+                      tone={weather.windKmh > 35 ? "alert" : "recovery"}
+                      label={`Viento ${weather.windKmh.toFixed(1)} kilometros por hora`}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between border-t border-border-subtle pt-2.5 text-[11px] text-ink-secondary tabular-nums">
+                    <span>Presion</span>
+                    <span className="font-semibold text-ink-primary">
+                      {weather.pressureHpa.toFixed(1)} hPa
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -621,6 +857,36 @@ export function HomeDashboardClient() {
           </section>
         </div>
       </div>
+
+      <section aria-label="Rachas de consistencia" className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <article className="flex items-center justify-between rounded-2xl border border-border-subtle bg-surface px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+              Racha activa
+            </p>
+            <p className="mt-1 text-xs text-ink-secondary">
+              Dias consecutivos con registro biometrico
+            </p>
+          </div>
+          <p className="text-3xl font-bold tracking-tight text-accent-recovery tabular-nums">
+            {streakSummary.activeStreakDays}d
+          </p>
+        </article>
+
+        <article className="flex items-center justify-between rounded-2xl border border-border-subtle bg-surface px-5 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-ink-secondary">
+              Check-ins
+            </p>
+            <p className="mt-1 text-xs text-ink-secondary tabular-nums">
+              {hasTodayCheckin ? "Check-in de hoy completado" : "Pendiente check-in de hoy"}
+            </p>
+          </div>
+          <p className="text-3xl font-bold tracking-tight text-ink-primary tabular-nums">
+            {streakSummary.checkinsCount}
+          </p>
+        </article>
+      </section>
     </div>
   );
 }
